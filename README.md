@@ -12,8 +12,8 @@ verify, and launch the latest release with:
 
 ```sh
 mkdir -p "$HOME/.local/opt/syncpulse" && cd "$HOME/.local/opt/syncpulse" && \
-curl -fLO https://github.com/S4ntyC1t/SyncPulse/releases/download/v0.1.0-pre.1/syncpulse-linux-x86_64.tar.gz && \
-curl -fLO https://github.com/S4ntyC1t/SyncPulse/releases/download/v0.1.0-pre.1/syncpulse-linux-x86_64.tar.gz.sha256 && \
+curl -fLO https://github.com/S4ntyC1t/SyncPulse/releases/download/v0.1.0-pre.2/syncpulse-linux-x86_64.tar.gz && \
+curl -fLO https://github.com/S4ntyC1t/SyncPulse/releases/download/v0.1.0-pre.2/syncpulse-linux-x86_64.tar.gz.sha256 && \
 sha256sum -c syncpulse-linux-x86_64.tar.gz.sha256 && \
 tar -xzf syncpulse-linux-x86_64.tar.gz && ./syncpulse
 ```
