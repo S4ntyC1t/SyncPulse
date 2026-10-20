@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Navidrome
+Comment=Open the local Navidrome music server
+Exec=navidrome-companion --syncpulse-service navidrome 4533
+Icon=syncpulse-navidrome-v2
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupWMClass=org.navidromehub.syncpulse.navidrome
+StartupNotify=true

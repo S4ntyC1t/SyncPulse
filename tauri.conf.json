@@ -1,0 +1,63 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SyncPulse",
+  "version": "0.1.0",
+  "identifier": "org.navidromehub.syncpulse",
+  "build": {
+    "frontendDist": "web"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "enableGTKAppId": true,
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost"
+    },
+    "windows": [
+      {
+        "title": "SyncPulse",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
+    "linux": {
+      "appimage": {
+        "files": {
+          "packaging/linux/org.navidromehub.syncpulse.desktop": "usr/share/applications/org.navidromehub.syncpulse.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.navidrome.desktop": "usr/share/applications/org.navidromehub.syncpulse.navidrome.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.invidious.desktop": "usr/share/applications/org.navidromehub.syncpulse.invidious.desktop",
+          "icons/syncpulse.png": "usr/share/icons/hicolor/256x256/apps/org.navidromehub.syncpulse.png",
+          "icons/navidrome.png": "usr/share/icons/hicolor/256x256/apps/syncpulse-navidrome-v2.png",
+          "icons/invidious.png": "usr/share/icons/hicolor/256x256/apps/syncpulse-invidious-v2.png"
+        }
+      },
+      "deb": {
+        "files": {
+          "packaging/linux/org.navidromehub.syncpulse.desktop": "/usr/share/applications/org.navidromehub.syncpulse.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.navidrome.desktop": "/usr/share/applications/org.navidromehub.syncpulse.navidrome.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.invidious.desktop": "/usr/share/applications/org.navidromehub.syncpulse.invidious.desktop",
+          "icons/syncpulse.png": "/usr/share/icons/hicolor/256x256/apps/org.navidromehub.syncpulse.png",
+          "icons/navidrome.png": "/usr/share/icons/hicolor/256x256/apps/syncpulse-navidrome-v2.png",
+          "icons/invidious.png": "/usr/share/icons/hicolor/256x256/apps/syncpulse-invidious-v2.png"
+        }
+      },
+      "rpm": {
+        "files": {
+          "packaging/linux/org.navidromehub.syncpulse.desktop": "/usr/share/applications/org.navidromehub.syncpulse.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.navidrome.desktop": "/usr/share/applications/org.navidromehub.syncpulse.navidrome.desktop",
+          "packaging/linux/org.navidromehub.syncpulse.invidious.desktop": "/usr/share/applications/org.navidromehub.syncpulse.invidious.desktop",
+          "icons/syncpulse.png": "/usr/share/icons/hicolor/256x256/apps/org.navidromehub.syncpulse.png",
+          "icons/navidrome.png": "/usr/share/icons/hicolor/256x256/apps/syncpulse-navidrome-v2.png",
+          "icons/invidious.png": "/usr/share/icons/hicolor/256x256/apps/syncpulse-invidious-v2.png"
+        }
+      }
+    }
+  }
+}

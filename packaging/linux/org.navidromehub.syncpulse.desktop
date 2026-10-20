@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=SyncPulse
+Comment=Install and manage self-hosted open-source services
+Exec=navidrome-companion
+Icon=org.navidromehub.syncpulse
+Terminal=false
+Categories=Utility;
+StartupWMClass=org.navidromehub.syncpulse
+StartupNotify=true

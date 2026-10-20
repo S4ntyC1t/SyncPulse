@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>SyncPulse</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#" aria-label="SyncPulse home" data-page="overview">
+          <span class="brand-mark"><span></span><span></span><span></span></span>
+          <span class="brand-name">sync<span>pulse</span></span>
+        </a>
+        <div class="sidebar-label">WORKSPACE</div>
+        <nav class="nav-list" aria-label="Main navigation">
+          <button class="nav-item" data-page="onboarding"><span class="nav-icon">✦</span>First setup</button>
+          <button class="nav-item active" data-page="overview"><span class="nav-icon">◫</span>Overview</button>
+          <button class="nav-item" data-page="services"><span class="nav-icon">◉</span>Services<span class="nav-count">2</span></button>
+          <button class="nav-item" data-page="downloader"><span class="nav-icon">↓</span>Downloader</button>
+          <button class="nav-item" data-page="plugins"><span class="nav-icon">◇</span>Extensions</button>
+        </nav>
+        <div class="sidebar-label sidebar-label-spaced">YOUR SERVICES</div>
+        <nav class="nav-list">
+          <button class="nav-item" data-page="navidrome"><span class="service-dot green"></span>Navidrome</button>
+          <button class="nav-item" data-page="invidious"><span class="service-dot red"></span>Invidious</button>
+          <button class="nav-item" data-page="accounts"><span class="nav-icon">◎</span>Accounts</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="nav-item" data-page="settings"><span class="nav-icon">⚙</span>Settings</button>
+          <div class="sidebar-profile">
+            <div class="profile-avatar">S</div>
+            <div><strong>SyncPulse</strong><small>Local instance</small></div>
+            <span class="profile-menu">•••</span>
+          </div>
+          <div class="version">SYNC PULSE <span>v0.1.0</span></div>
+        </div>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div class="breadcrumb"><span>Workspace</span><span class="crumb-sep">/</span><strong id="page-title">Overview</strong></div>
+          <div class="topbar-actions">
+            <span class="local-indicator"><i></i> Running locally</span>
+            <button class="icon-button" id="refresh-button" title="Refresh status" aria-label="Refresh status">↻</button>
+            <button class="avatar-small" title="SyncPulse">S</button>
+          </div>
+        </header>
+
+        <div class="content-wrap">
+          <section class="page" id="page-onboarding">
+            <div class="page-header">
+              <div class="eyebrow"><span class="eyebrow-line"></span>WELCOME TO SYNCPULSE</div>
+              <h1>Let’s set up your services.</h1>
+              <p class="page-lead">Each service has its own guided setup and health check. Install only what you want; Invidious uses your selected Docker or Podman Compose provider and downloads container images.</p>
+            </div>
+            <div class="plugin-grid onboarding-grid">
+              <article class="panel onboarding-card">
+                <div class="service-brand"><div class="service-logo music-logo"><span>♫</span></div><div><h2>Navidrome</h2><p>Music server · local library</p></div></div>
+                <div class="onboarding-checklist"><p><span>1</span> Download the official release for this computer</p><p><span>2</span> Verify the binary and create its configuration</p><p><span>3</span> Start the server and check its health endpoint</p></div>
+                <strong id="onboarding-navidrome-status" class="onboarding-status">Checking installation…</strong>
+                <button class="button button-primary button-wide" data-action="navidrome-primary" data-mode="install">Install Navidrome <span>↓</span></button>
+              </article>
+              <article class="panel onboarding-card">
+                <div class="service-brand"><div class="service-logo video-logo"><span>▶</span></div><div><h2>Invidious</h2><p>Private video frontend · containerized</p></div></div>
+                <div class="onboarding-checklist"><p><span>1</span> Check the selected engine and Compose provider</p><p><span>2</span> Prepare upstream database files and local secrets</p><p><span>3</span> Start the containers and verify the Invidious API</p></div>
+                <strong id="onboarding-invidious-status" class="onboarding-status">Checking installation…</strong>
+                <button class="button button-primary button-wide" data-action="invidious-primary" data-mode="install">Set up Invidious <span>↓</span></button>
+              </article>
+            </div>
+            <div class="panel onboarding-note"><strong>Already have a service?</strong><p>SyncPulse checks the configured local ports and can open a responding service without installing a duplicate. Review addresses and library folders in Settings.</p><button class="button button-quiet" data-page="services">Review service status →</button></div>
+          </section>
+
+          <section class="page active" id="page-overview">
+            <div class="welcome-row">
+              <div>
+                <div class="eyebrow"><span class="eyebrow-line"></span>YOUR PERSONAL SERVICE HUB</div>
+                <h1>Everything in <span>sync.</span></h1>
+                <p class="page-lead">A clear view of your self-hosted services, all in one place.</p>
+              </div>
+              <div class="date-chip"><span class="date-icon">◷</span><span id="local-time">Local time</span></div>
+            </div>
+
+            <div class="summary-grid">
+              <article class="summary-card">
+                <div class="summary-icon purple">◈</div>
+                <div><span class="summary-label">SERVICES ONLINE</span><strong id="online-count">—</strong><small>of 2 configured services</small></div>
+                <span class="summary-spark spark-purple">⌁</span>
+              </article>
+              <article class="summary-card">
+                <div class="summary-icon mint">⌁</div>
+                <div><span class="summary-label">CPU USAGE</span><strong id="cpu-usage">—</strong><small>System load</small></div>
+                <span class="summary-spark spark-mint">⌁</span>
+              </article>
+              <article class="summary-card">
+                <div class="summary-icon blue">▤</div>
+                <div><span class="summary-label">MEMORY</span><strong id="memory-usage">—</strong><small>Used by your system</small></div>
+                <span class="summary-spark spark-blue">⌁</span>
+              </article>
+            </div>
+
+            <div class="section-heading">
+              <div><h2>Your services</h2><p>Health and controls for services on this device.</p></div>
+              <button class="text-button" data-page="services">Manage services <span>→</span></button>
+            </div>
+
+            <div class="service-grid">
+              <article class="service-card navidrome-card">
+                <div class="service-card-top">
+                  <div class="service-brand">
+                    <div class="service-logo music-logo"><span>♫</span></div>
+                    <div><div class="service-title-row"><h3>Navidrome</h3><span id="navidrome-badge" class="status-badge neutral"><i></i> Checking</span></div><p>Your personal music server</p></div>
+                  </div>
+                  <button class="more-button" aria-label="Navidrome options">•••</button>
+                </div>
+                <div class="service-meta">
+                  <div><span class="meta-label">LOCAL ADDRESS</span><a id="navidrome-url" href="#">http://127.0.0.1:4533 <span>↗</span></a></div>
+                  <div><span class="meta-label">SYNC PULSE INSTALL</span><strong id="navidrome-install">Checking…</strong></div>
+                </div>
+                <div id="navidrome-note" class="service-note">Checking the local service address…</div>
+                <div class="card-footer">
+                  <span id="navidrome-last-check" class="updated-label">Status updates automatically</span>
+                  <div class="button-row">
+                    <button class="button button-quiet" data-action="open-navidrome">Open window <span>↗</span></button>
+                    <button class="button button-quiet" data-action="open-navidrome-browser">Browser <span>↗</span></button>
+                    <button class="button button-primary" id="navidrome-primary" data-action="navidrome-primary">Start service <span>→</span></button>
+                  </div>
+                </div>
+              </article>
+
+              <article class="service-card invidious-card">
+                <div class="service-card-top">
+                  <div class="service-brand">
+                    <div class="service-logo video-logo"><span>▶</span></div>
+                    <div><div class="service-title-row"><h3>Invidious</h3><span id="invidious-badge" class="status-badge neutral"><i></i> Checking</span></div><p>Open-source video frontend</p></div>
+                  </div>
+                  <button class="more-button" aria-label="Invidious options">•••</button>
+                </div>
+                <div class="service-meta">
+                  <div><span class="meta-label">LOCAL ADDRESS</span><a id="invidious-url" href="#">http://127.0.0.1:3000 <span>↗</span></a></div>
+                  <div><span class="meta-label">DEPLOYMENT</span><strong id="invidious-install">Checking…</strong></div>
+                </div>
+                <div id="invidious-note" class="service-note">The selected Compose provider manages this local deployment.</div>
+                <div class="card-footer">
+                  <span class="updated-label">Requires the selected container engine</span>
+                  <div class="button-row">
+                    <button class="button button-quiet" data-action="open-invidious">Open window <span>↗</span></button>
+                    <button class="button button-quiet" data-action="open-invidious-browser">Browser <span>↗</span></button>
+                    <button class="button button-primary" id="invidious-primary" data-action="invidious-primary">Set up service <span>→</span></button>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="bottom-grid">
+              <article class="panel quick-panel">
+                <div class="panel-heading"><div><h2>Quick actions</h2><p>Common tasks, one click away.</p></div><span class="panel-heading-icon">✦</span></div>
+                <div class="quick-actions">
+                  <button class="quick-action" data-page="downloader"><span class="quick-icon download-icon">↓</span><span><strong>Download music</strong><small>Save tracks to your library</small></span><b>→</b></button>
+                  <button class="quick-action" data-page="plugins"><span class="quick-icon plugin-icon">◇</span><span><strong>Explore extensions</strong><small>Add integrations to your setup</small></span><b>→</b></button>
+                </div>
+              </article>
+              <article class="panel system-panel">
+                <div class="panel-heading"><div><h2>System health</h2><p>Live metrics from this device.</p></div><span class="live-pill"><i></i> LIVE</span></div>
+                <div class="metric-row"><span>CPU</span><div class="metric-track"><i id="cpu-bar"></i></div><strong id="cpu-inline">—</strong></div>
+                <div class="metric-row"><span>Memory</span><div class="metric-track"><i id="memory-bar"></i></div><strong id="memory-inline">—</strong></div>
+                <div class="system-foot"><span class="system-dot"></span> SyncPulse is running on this device</div>
+              </article>
+            </div>
+          </section>
+
+          <section class="page" id="page-services">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>CONTROL CENTER</div><h1>Service manager</h1><p class="page-lead">Monitor, start, and configure your local services.</p></div>
+            <div class="service-grid services-page-grid">
+              <article class="service-card navidrome-card">
+                <div class="service-card-top"><div class="service-brand"><div class="service-logo music-logo"><span>♫</span></div><div><div class="service-title-row"><h3>Navidrome</h3><span id="navidrome-badge-page" class="status-badge neutral"><i></i> Checking</span></div><p>Your personal music server</p></div></div></div>
+                <div class="service-meta"><div><span class="meta-label">LOCAL ADDRESS</span><a id="navidrome-url-page" href="#">http://127.0.0.1:4533</a></div><div><span class="meta-label">MANAGED BINARY</span><strong id="navidrome-install-page">Checking…</strong></div></div>
+                <div id="navidrome-note-page" class="service-note"></div>
+                <div class="card-footer"><span class="updated-label">Only processes launched by SyncPulse can be stopped here.</span><div class="button-row"><button class="button button-quiet" data-action="open-navidrome">Open window ↗</button><button class="button button-quiet" data-action="open-navidrome-browser">Browser ↗</button><button class="button button-primary" id="navidrome-primary-page" data-action="navidrome-primary">Start service →</button></div></div>
+              </article>
+              <article class="service-card invidious-card">
+                <div class="service-card-top"><div class="service-brand"><div class="service-logo video-logo"><span>▶</span></div><div><div class="service-title-row"><h3>Invidious</h3><span id="invidious-badge-page" class="status-badge neutral"><i></i> Checking</span></div><p>Open-source video frontend</p></div></div></div>
+                <div class="service-meta"><div><span class="meta-label">LOCAL ADDRESS</span><a id="invidious-url-page" href="#">http://127.0.0.1:3000</a></div><div><span class="meta-label">DEPLOYMENT</span><strong id="invidious-install-page">Checking…</strong></div></div>
+                <div id="invidious-note-page" class="service-note">Runs with Docker or Podman Compose and preserves data when stopped.</div>
+                <div class="card-footer"><span class="updated-label">Choose Docker or Podman in Settings</span><div class="button-row"><button class="button button-quiet" data-action="open-invidious">Open window ↗</button><button class="button button-quiet" data-action="open-invidious-browser">Browser ↗</button><button class="button button-primary" id="invidious-primary-page" data-action="invidious-primary">Set up service →</button></div></div>
+              </article>
+            </div>
+            <div class="panel wide-panel"><div class="panel-heading"><div><h2>Automatic schedule</h2><p>Daily local-time window for Navidrome.</p></div><button class="button button-quiet" data-page="settings">Configure schedule →</button></div><p id="schedule-summary" class="schedule-summary">Schedule is off.</p></div>
+          </section>
+
+          <section class="page" id="page-downloader">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>YOUR MUSIC LIBRARY</div><h1>Music downloader</h1><p class="page-lead">Bring your favorite tracks into your Navidrome library.</p></div>
+            <div class="workspace-grid">
+              <article class="panel form-panel">
+                <div class="panel-heading"><div><h2>New download</h2><p>Paste a link to a track or playlist.</p></div><span class="panel-heading-icon">↓</span></div>
+                <label class="field-label" for="download-url">LINK</label><input id="download-url" class="text-input" placeholder="https://youtube.com/watch?v=…" autocomplete="url" />
+                <div class="field-row"><div class="field"><label class="field-label" for="download-format">FORMAT</label><select id="download-format" class="text-input"><option value="mp3">MP3</option><option value="m4a">M4A</option><option value="flac">FLAC</option></select></div><div class="field"><label class="field-label" for="download-quality">QUALITY</label><select id="download-quality" class="text-input"><option value="best">Best available</option><option value="320">320 kbps</option></select></div></div>
+                <div class="helper-box"><span>ⓘ</span><p>320 kbps is available for MP3. FLAC cannot improve quality beyond the original source.</p></div>
+                <button class="button button-primary button-wide" id="download-button">Download to music library <span>↓</span></button>
+                <div id="download-progress" class="operation-progress hidden"><div class="progress-caption"><span id="progress-message">Preparing…</span><strong id="progress-percent">0%</strong></div><div class="progress-track"><i id="progress-bar"></i></div></div>
+                <div id="download-error" class="error-message hidden"></div>
+                <div id="download-result" class="result-list hidden"></div>
+                <p class="helper-copy">If a downloaded track is still missing in Navidrome, please download one track again, then send the SyncPulse log file shown in Settings. It records the destination folder, saved files, and rescan result.</p>
+              </article>
+              <aside class="panel side-info">
+                <div class="panel-heading"><div><h2>How it works</h2><p>Fast, simple, local.</p></div></div>
+                <div class="steps">
+                  <div class="step"><span>1</span><div><strong>Paste a link</strong><p>Use a track or playlist URL supported by yt-dlp.</p></div></div>
+                  <div class="step"><span>2</span><div><strong>Choose your format</strong><p>Pick MP3, M4A, or FLAC for your library.</p></div></div>
+                  <div class="step"><span>3</span><div><strong>Find it in Navidrome</strong><p>Files are saved to your configured music folder.</p></div></div>
+                </div>
+                <div class="tool-status"><span class="tool-status-icon">⌘</span><div><strong>Powered by yt-dlp + FFmpeg</strong><small id="ytdlp-state">Checking installation…</small></div><span class="live-dot"></span></div>
+              </aside>
+            </div>
+          </section>
+
+          <section class="page" id="page-plugins">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>MAKE IT YOURS</div><h1>Extensions</h1><p class="page-lead">SyncPulse only offers integrations we've adapted and tested for managed services.</p></div>
+            <div class="plugin-grid">
+              <article class="panel plugin-card"><div class="plugin-hero discord-hero"><span>◉</span></div><div class="plugin-content"><div class="plugin-topline"><span class="plugin-category">NAVIDROME INTEGRATION</span><span id="discord-installed" class="installed-tag hidden">INSTALLED</span></div><h2>Discord Rich Presence</h2><p>Show the music you're listening to in your Discord status, with album art and playback details.</p><a class="external-link" href="https://github.com/S4ntyC1t/navidrome-discord-rpc">View project on GitHub ↗</a><button id="install-discord" class="button button-primary button-wide">Install and configure <span>→</span></button></div></article>
+              <article class="panel plugin-card custom-plugin"><div class="plugin-hero custom-hero"><span>◇</span></div><div class="plugin-content"><div class="plugin-topline"><span class="plugin-category">ADAPTED FOR SYNCPULSE</span></div><h2>Curated integrations</h2><p>Extensions appear here only after their setup, compatibility, and service controls have been adapted and tested by SyncPulse.</p><div class="helper-box"><span>✓</span><p>Arbitrary GitHub binaries are intentionally not installed or executed.</p></div></div></article>
+            </div>
+          </section>
+
+          <section class="page" id="page-navidrome">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>YOUR MUSIC, YOUR SERVER</div><h1>Navidrome</h1><p class="page-lead">A lightweight music server for your personal collection.</p></div>
+            <article class="panel detail-panel"><div class="detail-art music-art">♫</div><div class="detail-copy"><span class="plugin-category">MUSIC SERVER</span><h2>Listen on your own terms.</h2><p>Navidrome streams your music collection to any Subsonic-compatible player. SyncPulse can install and manage a local copy, or open an existing instance running on your configured port.</p><div class="detail-address"><span class="service-dot green"></span><span id="navidrome-url-detail">http://127.0.0.1:4533</span><span id="navidrome-badge-detail" class="status-badge neutral"><i></i> Checking</span></div><div class="button-row"><button class="button button-primary" data-action="open-navidrome">Open in window ↗</button><button class="button button-quiet" data-action="open-navidrome-browser">Open in browser ↗</button><button class="button button-quiet" data-page="services">Manage service</button></div></div></article>
+          </section>
+
+          <section class="page" id="page-invidious">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>VIDEO, WITHOUT THE NOISE</div><h1>Invidious</h1><p class="page-lead">A privacy-friendly alternative frontend for YouTube.</p></div>
+            <article class="panel detail-panel"><div class="detail-art video-art">▶</div><div class="detail-copy"><span class="plugin-category">VIDEO FRONTEND</span><h2>Your own private instance.</h2><p>Deploys Invidious with PostgreSQL and its required companion using the selected Docker or Podman Compose provider. The deployment stays local, and its database is kept when you stop it.</p><div class="detail-address"><span class="service-dot red"></span><span id="invidious-url-detail">http://127.0.0.1:3000</span><span id="invidious-badge-detail" class="status-badge neutral"><i></i> Checking</span></div><div class="button-row"><button class="button button-primary" data-action="open-invidious">Open in window ↗</button><button class="button button-quiet" data-action="open-invidious-browser">Open in browser ↗</button><button class="button button-quiet" id="invidious-detail-primary" data-action="invidious-primary">Set up service</button></div><div class="helper-box"><span>ⓘ</span><p>Installing pulls container images and official database initialization files; the first run uses network bandwidth and disk space.</p></div></div></article>
+          </section>
+
+          <section class="page" id="page-accounts">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>YOUR SERVICE ACCOUNTS</div><h1>Accounts</h1><p class="page-lead">Manage sign-in separately for each self-hosted service.</p></div>
+            <div class="plugin-grid account-grid">
+              <article class="panel account-card"><div class="service-brand"><div class="service-logo music-logo"><span>♫</span></div><div><h2>Navidrome account</h2><p>Users and permissions are managed by Navidrome.</p></div></div><p class="account-explanation">Open the local music server to sign in, create its first administrator, or manage additional users. SyncPulse never signs in for you; the optional account in Settings is used only to request a library rescan.</p><div class="account-actions"><button class="button button-primary" data-action="open-navidrome">Open in window ↗</button><button class="button button-quiet" data-action="open-navidrome-browser">Open in browser ↗</button></div></article>
+              <article class="panel account-card"><div class="service-brand"><div class="service-logo video-logo"><span>▶</span></div><div><h2>Invidious account</h2><p>Subscriptions and preferences are managed by Invidious.</p></div></div><p class="account-explanation">Open the local Invidious instance to sign in or manage its account. Invidious registration availability depends on the server configuration.</p><div class="account-actions"><button class="button button-primary" data-action="open-invidious">Open in window ↗</button><button class="button button-quiet" data-action="open-invidious-browser">Open in browser ↗</button></div></article>
+            </div>
+            <div class="panel onboarding-note account-note"><strong>One login everywhere is not enabled.</strong><p>Navidrome and Invidious have independent authentication. A single sign-on needs a compatible identity provider and explicit configuration for both services; SyncPulse does not claim to synchronize credentials.</p></div>
+          </section>
+
+          <section class="page" id="page-settings">
+            <div class="page-header"><div class="eyebrow"><span class="eyebrow-line"></span>MAKE SYNC PULSE YOURS</div><h1>Settings</h1><p class="page-lead">Choose where services live and when they run.</p></div>
+            <div class="settings-layout">
+              <article class="panel settings-panel">
+                <div class="panel-heading"><div><h2>Service ports</h2><p>Ports used for health checks and service shortcuts. Host/interface is set by phone access below.</p></div></div>
+                <div class="settings-row"><div><strong>Navidrome</strong><small>Default port 4533</small></div><label class="port-control">Port <input id="setting-navidrome-port" type="number" min="1" max="65535" /></label></div>
+                <div class="settings-row"><div><strong>Invidious</strong><small>Default port 3000</small></div><label class="port-control">Port <input id="setting-invidious-port" type="number" min="1" max="65535" /></label></div>
+                <div class="settings-row"><div><strong>Phone / other-device access</strong><small>Changing this does not enable public internet access.</small></div><select id="setting-network-access" class="text-input compact-select"><option value="local">This computer only</option><option value="lan">Home Wi-Fi / LAN</option><option value="tailscale">Private Tailscale network</option></select></div>
+                <p id="settings-network-note" class="inline-message" aria-live="polite"></p>
+                <div class="settings-row"><div><strong>Container engine</strong><small>Used for every Invidious install, start, stop and validation.</small></div><select id="setting-container-engine" class="text-input compact-select"><option value="docker">Docker Compose</option><option value="podman">Podman Compose</option></select></div>
+                <div class="helper-box"><span>ⓘ</span><p>Docker requires Engine and Compose v2. Podman requires a working Podman service and a Compose provider. Switching engines does not migrate containers or database volumes; stop the old deployment and keep a backup before switching. Invidious is only published on 127.0.0.1 unless you deliberately edit the Compose file.</p></div>
+                <div class="panel-heading settings-subheading"><div><h2>Navidrome library scan</h2><p>Optional account used to refresh your library immediately.</p></div></div>
+                <div class="field-row"><div class="field"><label class="field-label" for="setting-navidrome-user">NAVIDROME USER</label><input id="setting-navidrome-user" class="text-input" autocomplete="username" /><small class="field-help">An existing Navidrome account with permission to scan the library.</small></div><div class="field"><label class="field-label" for="setting-navidrome-password">NAVIDROME PASSWORD</label><input id="setting-navidrome-password" class="text-input" type="password" autocomplete="current-password" /><small class="field-help">Used only for the Subsonic rescan request and stored in your local config file.</small></div></div>
+                <div class="button-row config-actions"><button id="rescan-navidrome" class="button button-quiet">Rescan library now</button></div>
+                <p id="rescan-message" class="inline-message" aria-live="polite"></p>
+                <div class="helper-box"><span>ⓘ</span><p>With an account saved, SyncPulse asks Navidrome to scan right after each download, so new tracks appear without waiting. Without one, Navidrome still picks up new files on its own schedule. Leave both fields empty to remove the stored account.</p></div>
+                <div class="panel-heading settings-subheading"><div><h2>Invidious deployment file</h2><p>Edit the real Compose YAML used by the selected engine.</p></div></div>
+                <p class="config-pathline">FILE <code id="invidious-compose-path">Deploy Invidious to create or detect this file.</code></p>
+                <div class="helper-box"><span>ⓘ</span><p>The <code>invidious</code> service contains the app's YAML settings under <code>INVIDIOUS_CONFIG</code>; keep its database password in sync with the PostgreSQL service. The generated file also contains private keys. Saving preserves local-only file permissions.</p></div>
+                <div id="invidious-app-settings" class="invidious-app-settings">
+                  <div class="panel-heading settings-subheading"><div><h3>Common Invidious server settings</h3><p>These controls update the corresponding keys inside <code>INVIDIOUS_CONFIG</code>.</p></div></div>
+                  <div class="field-row"><div class="field"><label class="field-label" for="invidious-domain">PUBLIC DOMAIN (OPTIONAL)</label><input id="invidious-domain" class="text-input" placeholder="videos.example.com" /><small class="field-help">Leave blank for local-only access. Use a hostname only, without https:// or a path.</small></div><div class="field"><label class="field-label" for="invidious-external-port">EXTERNAL PROXY PORT (OPTIONAL)</label><input id="invidious-external-port" class="text-input" type="number" min="1" max="65535" placeholder="Leave unset for direct local access" /><small class="field-help">Set only when a reverse proxy exposes Invidious on a different port.</small></div></div>
+                  <label class="toggle-row"><span><strong>HTTPS-only URLs</strong><small>Enable when a reverse proxy terminates TLS and serves this instance over HTTPS.</small></span><input id="invidious-https-only" type="checkbox" /><i></i></label>
+                  <label class="toggle-row"><span><strong>Allow account registration</strong><small>Invidious-local accounts store subscriptions and playlists; turn off to prevent new accounts.</small></span><input id="invidious-registration-enabled" type="checkbox" /><i></i></label>
+                  <label class="toggle-row"><span><strong>Publish instance statistics</strong><small>Keep off for private instances. The upstream directory expects this for public instances.</small></span><input id="invidious-statistics-enabled" type="checkbox" /><i></i></label>
+                  <p id="invidious-config-support-note" class="inline-message"></p>
+                </div>
+                <textarea id="invidious-compose-editor" class="config-editor" spellcheck="false" aria-label="Invidious Compose YAML" placeholder="Install Invidious to generate a managed Compose file." disabled></textarea>
+                <div class="button-row config-actions"><button id="load-invidious-compose" class="button button-quiet">Reload file</button><button id="validate-invidious-compose" class="button button-quiet">Validate with selected engine</button><button id="save-invidious-compose" class="button button-primary">Save Compose file</button></div>
+                <p id="invidious-compose-message" class="inline-message" aria-live="polite"></p>
+                <div class="panel-heading settings-subheading"><div><h2>Storage folders</h2><p>Where SyncPulse installs and stores service data.</p></div></div>
+                <label class="field-label" for="setting-music">MUSIC LIBRARY</label><input id="setting-music" class="text-input path-input" />
+                <label class="field-label" for="setting-data">SERVICE DATA</label><input id="setting-data" class="text-input path-input" />
+                <label class="field-label" for="setting-bin">BINARIES</label><input id="setting-bin" class="text-input path-input" />
+                <label class="field-label" for="setting-plugins">EXTENSIONS</label><input id="setting-plugins" class="text-input path-input" />
+                <div class="panel-heading settings-subheading"><div><h2>Startup & schedule</h2><p>Keep your favorite service ready when you need it.</p></div></div>
+                <label class="toggle-row"><span><strong>Start Navidrome when SyncPulse opens</strong><small>Only starts a binary installed in the managed folder.</small></span><input id="setting-autostart" type="checkbox" /><i></i></label>
+                <label class="toggle-row"><span><strong>Daily schedule</strong><small>SyncPulse must remain open to enforce the schedule.</small></span><input id="setting-schedule" type="checkbox" /><i></i></label>
+                <div class="field-row schedule-fields" id="schedule-fields"><div class="field"><label class="field-label" for="setting-start-time">START</label><input id="setting-start-time" class="text-input" type="time" /></div><div class="field"><label class="field-label" for="setting-stop-time">STOP</label><input id="setting-stop-time" class="text-input" type="time" /></div></div>
+                <label class="toggle-row"><span><strong>Discord Rich Presence</strong><small>SyncPulse owns the RPC while open, even if Discord or Navidrome is closed; exiting SyncPulse stops it.</small></span><input id="setting-discord" type="checkbox" /><i></i></label>
+                <div class="panel-heading settings-subheading"><div><h2>Discord Rich Presence configuration</h2><p>These fields map directly to the upstream integration's supported environment variables.</p></div></div>
+                <p class="helper-copy">Your Navidrome login is stored only in a local file readable by your user account. It is required for playback polling. Changes take effect when you restart the integration below.</p>
+                <p id="rpc-conflict-message" class="inline-message" aria-live="polite"></p>
+                <div class="field-row"><div class="field"><label class="field-label" for="rpc-navidrome-url">NAVIDROME URL</label><input id="rpc-navidrome-url" class="text-input" type="url" placeholder="http://127.0.0.1:4533" /></div><div class="field"><label class="field-label" for="rpc-poll-interval">POLL INTERVAL (SECONDS)</label><input id="rpc-poll-interval" class="text-input" type="number" min="1" max="3600" /></div></div>
+                <div class="field-row"><div class="field"><label class="field-label" for="rpc-navidrome-user">NAVIDROME USER</label><input id="rpc-navidrome-user" class="text-input" autocomplete="username" /></div><div class="field"><label class="field-label" for="rpc-navidrome-password">NAVIDROME PASSWORD</label><input id="rpc-navidrome-password" class="text-input" type="password" autocomplete="current-password" /></div></div>
+                <div class="field-row"><div class="field"><label class="field-label" for="rpc-cover-mode">ALBUM ART SOURCE</label><select id="rpc-cover-mode" class="text-input"><option value="off">Off — status text only</option><option value="navidrome">Navidrome — already public</option><option value="server">Private cover server + tunnel</option></select></div><div class="field"><label class="field-label" for="rpc-public-url">PUBLIC HTTPS ORIGIN FOR DISCORD</label><input id="rpc-public-url" class="text-input" type="url" placeholder="https://music.example.com or Funnel URL" /><small class="field-help">Enter the public HTTPS base address Discord can reach—not localhost and not a URL path. See the guide below for where to get it.</small></div></div>
+                <div class="field"><label class="field-label" for="setting-artwork-tunnel">PREFERRED ARTWORK TUNNEL</label><select id="setting-artwork-tunnel" class="text-input"><option value="none">None — configure later</option><option value="tailscale">Tailscale Funnel</option><option value="cloudflare">Cloudflare Tunnel</option></select><small class="field-help">This preference alone does not publish anything. The Tailscale one-click button below asks for confirmation before making the artwork listener public. Without a public artwork URL, Discord uses the integration’s default Navidrome artwork icon.</small></div>
+                <p id="rpc-cover-help" class="helper-copy">Album art is off by default. Discord cannot fetch images from localhost.</p>
+                <div class="helper-box"><span>i</span><p><strong>Where to get this address:</strong> With <strong>Navidrome</strong>, enter the HTTPS address you already use to open Navidrome from outside your home. With <strong>Private cover server</strong>, first publish the shown loopback listener using Tailscale Funnel or a Cloudflare Tunnel, then enter that tunnel's public HTTPS hostname. For Funnel, use the machine's <code>.ts.net</code> address and the HTTPS port configured below (for example, <code>https://my-pc.example-tailnet.ts.net:8443</code>). For Cloudflare, use the public hostname you assign to the tunnel and route it to the cover listener. Enter only the origin (scheme, hostname, optional port), without a path or trailing slash. SyncPulse never creates a public tunnel automatically.</p></div>
+                <div class="field-row"><div class="field"><label class="field-label" for="rpc-client-id">DISCORD APPLICATION ID (OPTIONAL)</label><input id="rpc-client-id" class="text-input" inputmode="numeric" placeholder="Use the integration's built-in app" /></div><div class="field"><label class="field-label" for="rpc-covers-listen">COVER SERVER LISTEN ADDRESS</label><input id="rpc-covers-listen" class="text-input" placeholder="127.0.0.1:4534" /></div></div>
+                <div class="helper-box"><span>ⓘ</span><p>In <strong>server</strong> mode SyncPulse starts an image-only server bound to loopback; it never starts a public tunnel for you. Publish only that port using Tailscale Funnel or your reverse proxy. Funnel makes its selected port public (not just the image path), so avoid ports already used by Tailscale Serve.</p></div>
+                <div class="field-row funnel-row hidden"><div class="field"><label class="field-label" for="rpc-funnel-port">TAILSCALE FUNNEL HTTPS PORT</label><select id="rpc-funnel-port" class="text-input"><option value="443">443</option><option value="8443" selected>8443 (recommended)</option><option value="10000">10000</option></select><small class="field-help">Tailscale Funnel allows ports 443, 8443, and 10000.</small></div><div class="field funnel-command"><label class="field-label">MANUAL COMMAND (OPTIONAL)</label><code id="rpc-funnel-command">tailscale funnel --bg --https=8443 http://127.0.0.1:4534</code><button id="copy-funnel-command" class="button button-quiet">Copy command</button></div></div>
+                <div id="funnel-one-click" class="funnel-one-click hidden"><div><strong>Set up Tailscale Funnel automatically</strong><small>Publishes the cover-only local listener over a public HTTPS address. SyncPulse asks for confirmation before making it public.</small></div><button id="enable-funnel" class="button button-primary">Enable Funnel &amp; fill URL</button></div>
+                <div class="button-row config-actions"><button id="save-rpc-settings" class="button button-quiet">Save integration settings</button><button id="restart-rpc" class="button button-primary">Apply &amp; restart integration</button></div>
+                <p id="rpc-settings-message" class="inline-message" aria-live="polite"></p>
+                <div class="settings-actions"><span id="settings-message"></span><button id="save-settings" class="button button-primary">Save changes <span>✓</span></button></div>
+                <p class="config-pathline">DIAGNOSTIC LOG <code id="log-path">Loading...</code></p>
+              </article>
+              <aside class="panel settings-aside"><div class="settings-aside-art">⚙</div><h2>Local by design.</h2><p>SyncPulse stores settings on this device. Your service configuration and secrets stay in your local application folders.</p><div class="aside-info"><span>CONFIG FILE</span><code id="config-path">Loading…</code></div><div class="aside-info"><span>NAVIDROME BINARY</span><code id="managed-binary">Loading…</code></div></aside>
+            </div>
+          </section>
+
+          <footer class="app-footer"><span>Made for the open-source things you love.</span><span>SYNC PULSE <b>·</b> LOCAL FIRST</span></footer>
+        </div>
+      </main>
+    </div>
+    <div id="welcome-wizard" class="wizard-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+      <section class="wizard-panel">
+        <div class="wizard-brand"><span class="brand-mark"><span></span><span></span><span></span></span><span class="brand-name">sync<span>pulse</span></span></div>
+        <div id="wizard-welcome-step" class="wizard-step">
+          <div class="eyebrow"><span class="eyebrow-line"></span>YOUR FIRST RUN</div>
+          <h1 id="wizard-title">Welcome to SyncPulse</h1>
+          <p class="page-lead">Choose how much you want to configure now. You can change everything later in Settings.</p>
+          <div class="wizard-choice-grid">
+            <button id="wizard-quick-choice" class="wizard-choice">
+              <span class="wizard-choice-icon">✦</span><strong>Quick setup</strong>
+              <small>Choose what to install, your music folder, Discord Rich Presence, and optional tunnel guidance.</small>
+              <b>Get started →</b>
+            </button>
+            <button id="wizard-advanced-choice" class="wizard-choice">
+              <span class="wizard-choice-icon">⚙</span><strong>Advanced setup</strong>
+              <small>Also choose service ports, storage locations, startup behavior, and the container engine.</small>
+              <b>Configure details →</b>
+            </button>
+          </div>
+          <button id="wizard-skip" class="button button-quiet wizard-skip">Skip for now</button>
+        </div>
+        <div id="wizard-config-step" class="wizard-step hidden">
+          <div class="eyebrow"><span class="eyebrow-line"></span><span id="wizard-mode-label">QUICK SETUP</span></div>
+          <h1>Make it yours.</h1>
+          <p class="page-lead">Nothing is installed until you choose it here.</p>
+          <div class="wizard-scroll">
+            <div class="wizard-section-title">WHAT TO INSTALL</div>
+            <label class="wizard-check"><input id="wizard-install-navidrome" type="checkbox" checked /><span><strong>Navidrome</strong><small>Music server and personal library</small></span></label>
+            <label class="wizard-check"><input id="wizard-install-invidious" type="checkbox" /><span><strong>Invidious</strong><small>Private YouTube frontend · requires Docker or rootless Podman Compose</small></span></label>
+            <label class="wizard-check"><input id="wizard-install-rpc" type="checkbox" /><span><strong>Discord Rich Presence integration</strong><small>Install the plugin; connect your Navidrome account after Navidrome is set up. If you select no tunnel, Discord uses the default Navidrome artwork.</small></span></label>
+            <div id="wizard-container-options" class="hidden">
+              <div class="wizard-section-title">INVIDIOUS CONTAINER ENGINE</div>
+              <select id="wizard-engine" class="text-input"><option value="podman">Rootless Podman (recommended)</option><option value="docker">Docker (already installed)</option></select>
+              <div id="wizard-dependency-plan" class="helper-box hidden"><span>i</span><p id="wizard-dependency-plan-copy"></p></div>
+              <label id="wizard-install-dependencies-row" class="wizard-check hidden"><input id="wizard-install-dependencies" type="checkbox" checked /><span><strong>Install missing container dependencies</strong><small>Opens the system authorization dialog. The password is entered there and is never read or stored by SyncPulse.</small></span></label>
+            </div>
+            <label id="wizard-install-tailscale-row" class="wizard-check hidden"><input id="wizard-install-tailscale" type="checkbox" /><span><strong>Install / start Tailscale</strong><small>Installs Tailscale if missing, then enables and starts tailscaled. You still sign in and approve this device; it does not enable public Funnel.</small></span></label>
+            <div id="wizard-tailscale-plan" class="helper-box hidden"><span>i</span><p id="wizard-tailscale-plan-copy"></p></div>
+
+            <div class="wizard-section-title">ACCESS FROM OTHER DEVICES</div>
+            <label class="field-label" for="wizard-network-access">HOW SHOULD YOUR PHONE CONNECT?</label>
+            <select id="wizard-network-access" class="text-input"><option value="local">This computer only (recommended default)</option><option value="lan">Home Wi-Fi / LAN (devices on this network)</option><option value="tailscale">Tailscale network (private remote access)</option></select>
+            <p id="wizard-network-note" class="wizard-note">Services stay on this computer and are not reachable from your phone.</p>
+
+            <div class="wizard-section-title">MUSIC LIBRARY</div>
+            <label class="field-label" for="wizard-music-dir">WHERE YOUR MUSIC IS STORED</label>
+            <div class="wizard-path-row"><input id="wizard-music-dir" class="text-input" /><button class="button button-quiet" data-pick-directory="wizard-music-dir">Browse…</button></div>
+
+            <label class="field-label" for="wizard-bin-dir">WHERE TO INSTALL SERVICE BINARIES</label>
+            <div class="wizard-path-row"><input id="wizard-bin-dir" class="text-input" /><button class="button button-quiet" data-pick-directory="wizard-bin-dir">Browse...</button></div>
+            <div id="wizard-advanced-fields" class="hidden">
+              <div class="wizard-section-title">ADVANCED OPTIONS</div>
+              <div class="wizard-field-pair"><div><label class="field-label" for="wizard-navidrome-port">NAVIDROME PORT</label><input id="wizard-navidrome-port" class="text-input" type="number" min="1" max="65535" /></div><div><label class="field-label" for="wizard-invidious-port">INVIDIOUS PORT</label><input id="wizard-invidious-port" class="text-input" type="number" min="1" max="65535" /></div></div>
+              <label class="field-label" for="wizard-data-dir">SERVICE DATA FOLDER</label><div class="wizard-path-row"><input id="wizard-data-dir" class="text-input" /><button class="button button-quiet" data-pick-directory="wizard-data-dir">Browse…</button></div>
+              <label class="field-label" for="wizard-plugins-dir">PLUGINS FOLDER</label><div class="wizard-path-row"><input id="wizard-plugins-dir" class="text-input" /><button class="button button-quiet" data-pick-directory="wizard-plugins-dir">Browse…</button></div>
+              <label class="wizard-check"><input id="wizard-auto-start" type="checkbox" /><span><strong>Start Navidrome with SyncPulse</strong><small>Only starts a Navidrome installation managed here.</small></span></label>
+            </div>
+
+            <div id="wizard-rpc-options" class="hidden">
+              <div class="wizard-section-title">DISCORD ARTWORK &amp; TUNNEL</div>
+              <p class="wizard-note">Artwork publication is separate from phone access. Without a public HTTPS artwork URL, Discord shows playback status with its default artwork. Choosing a provider does not publish anything; Funnel requires a separate confirmation after setup.</p>
+              <label class="field-label" for="wizard-tunnel">HOW DO YOU WANT TO REACH THE ARTWORK SERVER?</label>
+              <select id="wizard-tunnel" class="text-input"><option value="none">No tunnel — configure later</option><option value="tailscale">Tailscale Funnel — I use Tailscale</option><option value="cloudflare">Cloudflare Tunnel — I use Cloudflare</option></select>
+              <label class="field-label" for="wizard-artwork-url">PUBLIC HTTPS ARTWORK URL (OPTIONAL; CAN BE SET LATER)</label>
+              <input id="wizard-artwork-url" class="text-input" type="url" placeholder="Configure after the tunnel is ready" />
+              <small class="field-help">Only the artwork listener (127.0.0.1:4534) may be published—not Navidrome or Invidious. SyncPulse will not create a public route without a separate confirmation.</small>
+              <p id="wizard-tunnel-note" class="wizard-note"></p>
+            </div>
+          </div>
+          <p id="wizard-error" class="error-message hidden"></p>
+          <div class="wizard-actions"><button id="wizard-back" class="button button-quiet">Back</button><button id="wizard-finish" class="button button-primary">Save and install selected items <span>→</span></button></div>
+        </div>
+        <div id="wizard-progress-step" class="wizard-step hidden">
+          <div class="eyebrow"><span class="eyebrow-line"></span>SETTING UP YOUR INSTANCE</div>
+          <h1 id="wizard-progress-title">Preparing SyncPulse…</h1>
+          <p id="wizard-progress-copy" class="page-lead">Your selected services are being installed.</p>
+          <div class="progress-track wizard-progress-track"><i id="wizard-progress-bar"></i></div>
+          <div class="wizard-progress-label"><span id="wizard-progress-message">Starting…</span><strong id="wizard-progress-percent">0%</strong></div>
+          <p id="wizard-progress-error" class="error-message hidden"></p>
+          <button id="wizard-progress-close" class="button button-primary hidden">Continue to SyncPulse →</button>
+        </div>
+      </section>
+    </div>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <div id="global-progress" class="global-progress hidden"><div class="progress-caption"><span id="global-progress-message">Working…</span><strong id="global-progress-percent">0%</strong></div><div class="progress-track"><i id="global-progress-bar"></i></div></div>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+/target/
+/dist/
+*.AppImage
+*.deb
+*.rpm
+*.tar.gz
+*.sha256
+.env
+.env.*
+!.env.example
+*.log
+_tmp_*
+.directory

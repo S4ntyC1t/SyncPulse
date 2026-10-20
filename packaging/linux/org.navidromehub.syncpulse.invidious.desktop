@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Invidious
+Comment=Open the local Invidious video service
+Exec=navidrome-companion --syncpulse-service invidious 3000
+Icon=syncpulse-invidious-v2
+Terminal=false
+Categories=AudioVideo;Video;Player;
+StartupWMClass=org.navidromehub.syncpulse.invidious
+StartupNotify=true
