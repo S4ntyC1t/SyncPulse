@@ -16,6 +16,7 @@
 #![cfg(target_os = "linux")]
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::webkit_governor::{self, WebKitRole};
 use crate::ServiceWindow;
@@ -95,12 +96,145 @@ fn build_window(
     window.set_default_size(1100, 760);
     window.set_size_request(720, 520);
     window.set_icon(Some(&service_icon(service)?));
-    window.add(&webview);
+
+    let navigation = Navigation::build(&webview);
+    install_navigation_shortcuts(application, &window, &webview);
+    let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    layout.pack_start(&navigation.bar(), false, false, 0);
+    layout.pack_start(&webview, true, true, 0);
+    window.add(&layout);
     window.show_all();
     webview.grab_focus();
 
+    // WebKitGTK exposes `can_go_back`/`can_go_forward` as plain getters rather
+    // than GObject properties, so there is no notify signal to react to. A
+    // short poll keeps the arrows greyed out whenever there is nothing to go
+    // back or forward to.
+    let history = watch_history(&webview, &navigation);
+    let history = std::cell::RefCell::new(Some(history));
+    window.connect_destroy(move |_| {
+        if let Some(history) = history.borrow_mut().take() {
+            history.remove();
+        }
+    });
+
     webview.load_uri(url);
     Ok(())
+}
+
+/// The browser-ish toolbar that sits above the service page.
+///
+/// A bare `WebView` has no chrome at all: the only way out of the page
+/// SyncPulse opened would be clicking a link, which makes the service windows
+/// feel like a screenshot instead of a browser.
+#[derive(Clone)]
+struct Navigation {
+    back: gtk::Button,
+    forward: gtk::Button,
+    reload: gtk::Button,
+}
+
+impl Navigation {
+    fn build(webview: &WebView) -> Self {
+        let back = navigation_button("go-previous-symbolic", "Back");
+        let forward = navigation_button("go-next-symbolic", "Forward");
+        let reload = navigation_button("view-refresh-symbolic", "Reload");
+
+        {
+            let webview = webview.clone();
+            back.connect_clicked(move |_| webview.go_back());
+        }
+        {
+            let webview = webview.clone();
+            forward.connect_clicked(move |_| webview.go_forward());
+        }
+        {
+            let webview = webview.clone();
+            reload.connect_clicked(move |_| webview.reload());
+        }
+
+        let navigation = Self {
+            back,
+            forward,
+            reload,
+        };
+        navigation.update(webview);
+        navigation
+    }
+
+    /// Grey out the arrows that cannot be used right now.
+    fn update(&self, webview: &WebView) {
+        self.back.set_sensitive(webview.can_go_back());
+        self.forward.set_sensitive(webview.can_go_forward());
+    }
+
+    fn bar(&self) -> gtk::Box {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        bar.set_margin_start(6);
+        bar.set_margin_end(6);
+        bar.set_margin_top(4);
+        bar.set_margin_bottom(4);
+        bar.style_context().add_class("toolbar");
+        bar.pack_start(&self.back, false, false, 0);
+        bar.pack_start(&self.forward, false, false, 0);
+        bar.pack_start(&self.reload, false, false, 0);
+        bar
+    }
+}
+
+fn navigation_button(icon: &str, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    let image = gtk::Image::from_icon_name(Some(icon), gtk::IconSize::Button);
+    button.set_image(Some(&image));
+    button.set_relief(gtk::ReliefStyle::None);
+    button.set_tooltip_text(Some(tooltip));
+    button
+}
+
+/// Keyboard shortcuts for the very same actions, so the toolbar is not the
+/// only way to drive the page.
+///
+/// The actions live in the window's own `win.` group: that is the group GTK
+/// looks the shortcut up in when the window handles the key press, and an
+/// action added to the application itself would never be reachable that way.
+fn install_navigation_shortcuts(
+    application: &gtk::Application,
+    window: &gtk::ApplicationWindow,
+    webview: &WebView,
+) {
+    let back = gio::SimpleAction::new("nav-back", None);
+    {
+        let webview = webview.clone();
+        back.connect_activate(move |_, _| webview.go_back());
+    }
+    window.add_action(&back);
+    application.set_accels_for_action("win.nav-back", &["<Alt>Left"]);
+
+    let forward = gio::SimpleAction::new("nav-forward", None);
+    {
+        let webview = webview.clone();
+        forward.connect_activate(move |_, _| webview.go_forward());
+    }
+    window.add_action(&forward);
+    application.set_accels_for_action("win.nav-forward", &["<Alt>Right"]);
+
+    let reload = gio::SimpleAction::new("nav-reload", None);
+    {
+        let webview = webview.clone();
+        reload.connect_activate(move |_, _| webview.reload());
+    }
+    window.add_action(&reload);
+    application.set_accels_for_action("win.nav-reload", &["<Primary>r", "F5"]);
+}
+
+/// Keep the arrows in sync with the WebView history.
+fn watch_history(webview: &WebView, navigation: &Navigation) -> gtk::glib::SourceId {
+    let webview = webview.clone();
+    let navigation = navigation.clone();
+    gtk::glib::timeout_add_local(Duration::from_millis(400), move || {
+        navigation.update(&webview);
+        gtk::glib::ControlFlow::Continue
+    })
 }
 
 /// Build the governed `WebContext` for a service window.
