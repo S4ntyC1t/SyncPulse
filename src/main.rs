@@ -1400,7 +1400,24 @@ async fn validate_invidious_compose(state: State<'_, AppState>) -> Result<(), St
 async fn open_navidrome(state: State<'_, AppState>) -> Result<String, String> {
     let (port, host) = configured_service_endpoint(&state, true)?;
     ensure_navidrome_reachable(&state, &host, port).await?;
+    // The user can ask for the native client instead of the WebKit window,
+    // which needs a fraction of the memory.
+    #[cfg(target_os = "linux")]
+    if native_client_preferred(&state) {
+        return spawn_native_client();
+    }
     spawn_service_window(ServiceWindow::Navidrome, &host, port)
+}
+
+/// Whether Navidrome should open in the native client rather than in the
+/// WebKit-hosted service window.
+#[cfg(target_os = "linux")]
+fn native_client_preferred(state: &State<'_, AppState>) -> bool {
+    state
+        .runtime
+        .lock()
+        .map(|runtime| runtime.config.native_client)
+        .unwrap_or(false)
 }
 
 #[tauri::command]

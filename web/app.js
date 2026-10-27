@@ -590,6 +590,7 @@ function populateSettings(data) {
   byId("setting-autostart").checked = config.auto_start;
   byId("setting-schedule").checked = config.schedule_enabled;
   byId("setting-discord").checked = config.discord_rpc_enabled;
+  byId("setting-native-client").checked = Boolean(config.native_client);
   setTimeValue("setting-start-time", config.schedule_start_hour, config.schedule_start_minute);
   setTimeValue("setting-stop-time", config.schedule_stop_hour, config.schedule_stop_minute);
   byId("schedule-fields").classList.toggle("visible", config.schedule_enabled);
@@ -804,6 +805,7 @@ async function saveSettings() {
     navidrome_password: byId("setting-navidrome-password").value || null,
     auto_start: byId("setting-autostart").checked,
     schedule_enabled: byId("setting-schedule").checked,
+    native_client: byId("setting-native-client").checked,
     schedule_start_hour: start.hour,
     schedule_start_minute: start.minute,
     schedule_stop_hour: stop.hour,

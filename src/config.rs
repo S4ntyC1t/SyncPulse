@@ -42,6 +42,9 @@ pub struct Config {
     pub schedule_stop_minute: u8,
     pub hide_console: bool,
     pub tailscale: bool,
+    /// Open Navidrome in the native GTK client instead of the WebKit-hosted
+    /// window. The native client needs a fraction of the memory.
+    pub native_client: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_music_dir: Option<PathBuf>,
     pub discord_rpc_enabled: bool,
@@ -94,6 +97,7 @@ impl Default for Config {
             schedule_stop_minute: 0,
             hide_console: true,
             tailscale: false,
+            native_client: false,
             last_music_dir: None,
             discord_rpc_enabled: false,
             discord_artwork_tunnel: "none".to_owned(),
@@ -334,5 +338,17 @@ mod tests {
     #[test]
     fn fresh_default_config_requires_initial_setup() {
         assert!(!Config::default().setup_completed);
+    }
+
+    #[test]
+    fn old_settings_files_keep_the_browser_window() {
+        let config = super::parse_config("navidrome_port = 4533\n").unwrap();
+        assert!(!config.native_client);
+    }
+
+    #[test]
+    fn the_native_client_preference_survives_a_save_and_load() {
+        let config = super::parse_config("native_client = true\n").unwrap();
+        assert!(config.native_client);
     }
 }
