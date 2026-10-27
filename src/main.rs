@@ -9,7 +9,7 @@ mod downloader;
 mod installer;
 mod invidious;
 #[cfg(target_os = "linux")]
-mod native_player;
+mod native_client;
 mod network;
 mod plugins;
 mod process;
@@ -1680,13 +1680,13 @@ fn main() {
         }
     }
 
-    // Pilot: a fully native player window (no embedded browser engine).
+    // A fully native Navidrome client (no embedded browser engine).
     #[cfg(target_os = "linux")]
     if std::env::args()
         .skip(1)
-        .any(|arg| arg == "--syncpulse-player")
+        .any(|arg| arg == "--syncpulse-client")
     {
-        if let Err(error) = native_player::run() {
+        if let Err(error) = native_client::run() {
             tracing::error!("{error}");
             std::process::exit(1);
         }
