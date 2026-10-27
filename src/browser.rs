@@ -10,6 +10,7 @@ pub fn open(url: &str) -> Result<(), String> {
         .spawn();
 
     result
+        .map(crate::children::track)
         .map(|_| ())
         .map_err(|error| format!("Unable to open the system browser: {error}"))
 }

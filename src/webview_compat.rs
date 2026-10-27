@@ -17,9 +17,15 @@ pub fn apply_linux_webview_env() {
         if !nvidia_gpu_present() {
             return;
         }
-        // Keeps the accelerated DMA-BUF path while avoiding the Wayland
-        // explicit-sync protocol error common with NVIDIA + KWin.
-        set_env_if_unset("__NV_DISABLE_EXPLICIT_SYNC", "1");
+        for (key, value) in linux_webview_env_defaults() {
+            set_env_if_unset(key, value);
+        }
+        // Do not force GDK_BACKEND here. Under a Wayland session WebKitGTK
+        // renders natively (the same path the standalone service windows use),
+        // while forcing `x11` routed the main window through XWayland and left
+        // it blank on NVIDIA + KWin. Users who nonetheless want XWayland can
+        // still set GDK_BACKEND themselves, which we leave untouched.
+        //
         // If a previous SyncPulse build (or the user) forced the slow DMA-BUF
         // workaround, clear it unless they explicitly opted in via
         // SYNCPULSE_WEBKIT_DISABLE_DMABUF=1.
@@ -35,6 +41,25 @@ pub fn apply_linux_webview_env() {
             }
         }
     }
+}
+
+/// Environment defaults applied on NVIDIA systems. Kept as data so the exact
+/// behaviour can be unit-tested without touching the process environment.
+#[cfg(target_os = "linux")]
+fn linux_webview_env_defaults() -> [(&'static str, &'static str); 2] {
+    [
+        // Keeps the accelerated DMA-BUF path while avoiding the Wayland
+        // explicit-sync protocol error common with NVIDIA + KWin.
+        ("__NV_DISABLE_EXPLICIT_SYNC", "1"),
+        // Video inside the Invidious WebView renders green on NVIDIA because
+        // WebKitGTK's GL video sink imports the decoded NV12 buffer as a
+        // DMA-BUF/EGLImage with a mismatched format (WebKit bugs #260654 and
+        // #261874). Moving frames through the system-memory path (disable the
+        // GL sink) renders correct colours; the DMA-BUF sink and the NVIDIA
+        // hardware decoder are both fine on their own. Verified against a local
+        // H.264 clip on a GTX 1070 Ti with driver 580.178.04.
+        ("WEBKIT_GST_DISABLE_GL_SINK", "1"),
+    ]
 }
 
 /// Initialization script for the Invidious WebKit service window.
@@ -149,14 +174,18 @@ pub fn navidrome_paused_volume_workaround_script() -> &'static str {
 })();"#
 }
 
-/// Disable WebKit's native Media Session / MPRIS bridge for Invidious.
+/// Disable named WebKit feature areas on a WebView.
 ///
-/// Navidrome keeps WebKit's normal MediaSession behavior so its player pause
-/// and volume controls work like they do in a regular browser. Resolve the
-/// WebKit 2.42 feature API dynamically because Tauri also
-/// supports older WebKitGTK releases where those symbols are not available.
+/// Used to strip integrations SyncPulse's service shells do not want (Invidious
+/// must not hijack the desktop's MediaSession / MPRIS bridge) and to drop
+/// feature areas that would otherwise cost memory for nothing. Resolve the
+/// WebKit 2.42 feature API dynamically because Tauri also supports older
+/// WebKitGTK releases where those symbols are not available.
 #[cfg(target_os = "linux")]
-pub fn disable_service_window_media_session(webview: &webkit2gtk::WebView) -> Result<(), String> {
+pub(crate) fn disable_webkit_features(
+    webview: &webkit2gtk::WebView,
+    names: &[&str],
+) -> Result<Vec<String>, String> {
     use webkit2gtk::glib::translate::ToGlibPtr;
     use webkit2gtk::WebViewExt;
 
@@ -192,7 +221,7 @@ pub fn disable_service_window_media_session(webview: &webkit2gtk::WebView) -> Re
 
     let settings = webview
         .settings()
-        .ok_or_else(|| "Unable to get WebKit settings for the service window".to_owned())?;
+        .ok_or_else(|| "Unable to get WebKit settings".to_owned())?;
     let settings_ptr: *mut webkit2gtk::ffi::WebKitSettings = settings.to_glib_none().0;
     let features = unsafe { get_features() };
     if features.is_null() {
@@ -200,24 +229,17 @@ pub fn disable_service_window_media_session(webview: &webkit2gtk::WebView) -> Re
     }
 
     let mut disabled = Vec::new();
-    for name in ["MediaSession", "RemoteMediaSessionManager"] {
-        let name_c = std::ffi::CString::new(name).expect("feature names contain no NUL bytes");
+    for name in names {
+        let name_c = std::ffi::CString::new(*name).expect("feature names contain no NUL bytes");
         let feature = unsafe { find_feature(features, name_c.as_ptr()) };
         if !feature.is_null() {
             unsafe { set_feature_enabled(settings_ptr.cast(), feature, 0) };
-            disabled.push(name);
+            disabled.push((*name).to_owned());
         }
     }
     unsafe { unref_feature_list(features) };
 
-    if disabled.is_empty() {
-        return Err("WebKitGTK did not provide the MediaSession features".to_owned());
-    }
-    tracing::info!(
-        "Disabled WebKit service-window features: {}",
-        disabled.join(", ")
-    );
-    Ok(())
+    Ok(disabled)
 }
 
 #[cfg(target_os = "linux")]
@@ -245,6 +267,18 @@ fn nvidia_gpu_present() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{navidrome_paused_volume_workaround_script, service_window_init_script};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn nvidia_defaults_disable_gl_video_sink_and_keep_explicit_sync_workaround() {
+        use super::linux_webview_env_defaults;
+
+        let defaults = linux_webview_env_defaults();
+        assert!(defaults.contains(&("__NV_DISABLE_EXPLICIT_SYNC", "1")));
+        assert!(defaults.contains(&("WEBKIT_GST_DISABLE_GL_SINK", "1")));
+        // GDK_BACKEND must never be forced: native Wayland is the working path.
+        assert!(!defaults.iter().any(|(key, _)| *key == "GDK_BACKEND"));
+    }
 
     #[test]
     fn service_init_script_disables_media_session_without_intercepting_keys() {

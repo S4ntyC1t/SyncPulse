@@ -42,9 +42,20 @@ walkdir = "2"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
+# GTK is used directly to host the service windows: it is the only way to give
+# WebKit a WebContext SyncPulse can configure (see src/service_window.rs).
+gtk = { version = "0.18", features = ["v3_24"] }
 
 # Subsonic token authentication for Navidrome library rescans
 md-5 = "0.10"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# Keep the shipped binary small: SyncPulse is a WebView shell whose own code is
+# tiny compared to WebKit, so a bloated binary only costs disk and page-cache
+# pressure. Symbol stripping also keeps the RSS low when the loader maps it.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

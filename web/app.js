@@ -687,6 +687,10 @@ function updateCoverHelp() {
 }
 
 async function refreshDashboard() {
+  // Skip polling while the window is hidden/minimized: there is nothing to
+  // update and the backend probes (HTTP checks, process and system scans)
+  // would keep the CPU and allocator warm for no reason.
+  if (document.hidden) return;
   try {
     const [data, metrics] = await Promise.all([invoke("dashboard"), invoke("system_metrics")]);
     applyDashboard(data);
@@ -923,8 +927,16 @@ document.addEventListener("click", async (event) => {
   event.preventDefault();
   try {
     switch (actionButton.dataset.action) {
-      case "open-navidrome": await invoke("open_navidrome"); break;
-      case "open-invidious": await invoke("open_invidious"); break;
+      case "open-navidrome": {
+        const message = await invoke("open_navidrome");
+        if (message) toast(message);
+        break;
+      }
+      case "open-invidious": {
+        const message = await invoke("open_invidious");
+        if (message) toast(message);
+        break;
+      }
       case "open-navidrome-browser": await invoke("open_navidrome_browser"); break;
       case "open-invidious-browser": await invoke("open_invidious_browser"); break;
       case "navidrome-primary": await runNavidromeAction(actionButton); break;
@@ -1081,4 +1093,9 @@ listen("operation-progress", (event) => {
 });
 
 refreshDashboard();
-window.setInterval(refreshDashboard, 7000);
+window.setInterval(refreshDashboard, 15000);
+// Refresh immediately when the window becomes visible again, since polling is
+// paused while it is hidden.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) void refreshDashboard();
+});

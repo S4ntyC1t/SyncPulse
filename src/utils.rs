@@ -62,3 +62,30 @@ pub fn spawn_detached_no_window(
     c.args(args).spawn()?;
     Ok(())
 }
+
+/// Periodically returns freed heap pages to the operating system.
+///
+/// glibc keeps freed allocations in its arenas; a long-running GUI shell that
+/// repeatedly allocates buffers (JSON payloads, HTTP responses, process scans)
+/// can end up holding tens of megabytes that it never uses again. `malloc_trim`
+/// hands those pages back so RSS follows real usage instead of the historical
+/// high-water mark. Safe to call more than once; a no-op off glibc/Linux.
+pub fn start_memory_maintenance() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        static STARTED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+        if STARTED.set(()).is_err() {
+            return;
+        }
+        let _ = std::thread::Builder::new()
+            .name("memory-maintenance".to_owned())
+            .spawn(|| loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                // SAFETY: malloc_trim only inspects and releases the calling
+                // process' own allocator arenas and is thread-safe.
+                unsafe {
+                    libc::malloc_trim(0);
+                }
+            });
+    }
+}

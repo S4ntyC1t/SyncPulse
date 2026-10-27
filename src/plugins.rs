@@ -234,11 +234,6 @@ impl PluginManager {
             .ok_or_else(|| anyhow!("Discord RPC binary is not configured"))?
             .canonicalize()
             .context("Unable to resolve Discord RPC binary")?;
-        if linux_plugin_process_running(&binary, None) {
-            return Err(anyhow!(
-                "The Discord Rich Presence process managed by SyncPulse is already running"
-            ));
-        }
         {
             let mut supervisors = self
                 .rpc_supervisors
@@ -249,6 +244,23 @@ impl PluginManager {
                     return Ok(());
                 }
                 supervisors.remove(&binary);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(pid) = linux_plugin_process_pid(&binary, None) {
+            // No supervisor owns it: the copy is either an orphan from a dead
+            // supervisor or an unmanaged leftover, both safe to stop first.
+            if linux_discord_rpc_copy_ownership(pid)
+                == DiscordRpcCopyOwnership::LiveSyncPulseInstance
+            {
+                return Err(anyhow!(
+                    "The Discord Rich Presence process (PID {pid}) is managed by another SyncPulse instance"
+                ));
+            }
+            if !linux_stop_foreign_discord_rpc_copy(pid) {
+                return Err(anyhow!(
+                    "Unable to stop the previous Discord Rich Presence process (PID {pid})"
+                ));
             }
         }
         self.start_discord_rpc_if_enabled(config)
@@ -301,6 +313,39 @@ impl PluginManager {
     pub fn discord_rpc_conflict(config: &Config) -> Option<String> {
         let binary = config.discord_rpc_bin.as_ref()?.canonicalize().ok()?;
         let (pid, executable) = Self::find_other_discord_rpc_process(&binary)?;
+
+        #[cfg(target_os = "linux")]
+        match linux_discord_rpc_copy_ownership(pid) {
+            DiscordRpcCopyOwnership::LiveSyncPulseInstance => Some(format!(
+                "Another SyncPulse instance is running Discord Rich Presence (PID {pid}: {}). Close that instance, then restart Discord Rich Presence here.",
+                executable.display()
+            )),
+            // Self-heal: an unmanaged copy (autostart entry, systemd unit,
+            // stale debug build) is stopped so the managed one can take over
+            // without manual action. Ownership is only claimed while SyncPulse
+            // is configured to run Rich Presence.
+            DiscordRpcCopyOwnership::OrphanOfThisInstance
+            | DiscordRpcCopyOwnership::Foreign => {
+                if !config.discord_rpc_enabled {
+                    return Some(format!(
+                        "An unmanaged Discord RPC copy is running (PID {pid}: {}). Enable Discord Rich Presence in SyncPulse to have it taken over automatically.",
+                        executable.display()
+                    ));
+                }
+                if linux_stop_foreign_discord_rpc_copy(pid)
+                    && Self::find_other_discord_rpc_process(&binary).is_none()
+                {
+                    None
+                } else {
+                    Some(format!(
+                        "SyncPulse could not stop an unmanaged Discord RPC copy (PID {pid}: {}). Close it manually, then restart Discord Rich Presence.",
+                        executable.display()
+                    ))
+                }
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
         Some(format!(
             "Another Discord RPC copy is running (PID {pid}: {}). Close that copy before SyncPulse can own Discord Rich Presence.",
             executable.display()
@@ -704,20 +749,25 @@ impl PluginManager {
 }
 
 #[cfg(target_os = "linux")]
-fn linux_plugin_process_running(binary: &Path, required_argument: Option<&str>) -> bool {
+fn linux_plugin_process_pid(binary: &Path, required_argument: Option<&str>) -> Option<u32> {
     linux_processes()
         .into_iter()
-        .any(|(_, executable, args, env)| {
+        .find_map(|(pid, executable, args, env)| {
             if !same_path(&executable, binary) {
-                return false;
+                return None;
             }
             let is_cover_server = process_args_are_cover_server(&args, &env);
             match required_argument {
-                Some("serve-covers") => is_cover_server,
-                Some(_) => false,
-                None => !is_cover_server,
+                Some("serve-covers") => is_cover_server.then_some(pid),
+                Some(_) => None,
+                None => (!is_cover_server).then_some(pid),
             }
         })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_plugin_process_running(binary: &Path, required_argument: Option<&str>) -> bool {
+    linux_plugin_process_pid(binary, required_argument).is_some()
 }
 
 #[cfg(target_os = "linux")]
@@ -731,6 +781,160 @@ fn linux_other_discord_rpc_process(binary: &Path) -> Option<(u32, PathBuf)> {
                 && !process_args_are_cover_server(&args, &env))
             .then_some((pid, executable))
         })
+}
+
+/// Who a (not-yet-managed) copy of the Discord RPC binary belongs to.
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscordRpcCopyOwnership {
+    /// Another, still-running SyncPulse instance manages this copy; its
+    /// settings already reached Discord, so the copy must be left alone.
+    LiveSyncPulseInstance,
+    /// An orphaned child previously spawned by this SyncPulse instance whose
+    /// supervisor thread is gone; safe to stop and restart.
+    OrphanOfThisInstance,
+    /// Started outside SyncPulse (autostart entry, systemd unit, terminal,
+    /// stale leftover). SyncPulse owns Rich Presence while it is open, so the
+    /// copy is stopped automatically instead of blocking the managed one.
+    Foreign,
+}
+
+#[cfg(target_os = "linux")]
+fn linux_discord_rpc_process_state(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close_comm = stat.rfind(')')?;
+    stat[close_comm + 1..]
+        .split_whitespace()
+        .next()
+        .map(str::to_owned)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_discord_rpc_process_alive(pid: u32) -> bool {
+    linux_discord_rpc_process_state(pid).is_some_and(|state| state != "Z")
+}
+
+/// Ancestors of `copy_pid`, nearest first, skipping zombies. Each entry is
+/// `(pid, executable)`, where the executable is `None` when it cannot be read
+/// (for example a kernel thread).
+#[cfg(target_os = "linux")]
+fn linux_parent_chain(copy_pid: u32) -> Vec<(u32, Option<PathBuf>)> {
+    const MAX_ANCESTORS: usize = 16;
+    let mut chain = Vec::new();
+    let mut current = copy_pid;
+    for _ in 0..MAX_ANCESTORS {
+        if !linux_discord_rpc_process_alive(current) {
+            break;
+        }
+        let stat = match fs::read_to_string(format!("/proc/{current}/stat")) {
+            Ok(stat) => stat,
+            Err(_) => break,
+        };
+        let Some(close_comm) = stat.rfind(')') else {
+            break;
+        };
+        let mut fields = stat[close_comm + 1..].split_whitespace();
+        let state = fields.next().unwrap_or_default();
+        let ppid = fields.next().and_then(|ppid| ppid.parse::<u32>().ok());
+        let Some(ppid) = ppid else {
+            break;
+        };
+        if state == "Z" || ppid <= 1 {
+            break;
+        }
+        current = ppid;
+        chain.push((current, fs::read_link(format!("/proc/{current}/exe")).ok()));
+    }
+    chain
+}
+
+/// Classifies an RPC copy by walking its parent chain: the nearest ancestor
+/// that is SyncPulse decides, otherwise the copy is foreign.
+#[cfg(target_os = "linux")]
+fn linux_classify_discord_rpc_copy(
+    own_pid: u32,
+    own_executable: Option<&Path>,
+    parent_chain: &[(u32, Option<PathBuf>)],
+) -> DiscordRpcCopyOwnership {
+    for (pid, executable) in parent_chain {
+        // A dead ancestor may still read as a zombie whose executable link is
+        // gone; keep walking while nothing identifies the owner.
+        let Some(executable) = executable else {
+            continue;
+        };
+        let is_syncpulse_copy = own_executable
+            .map(|own| same_path(executable, own) || executable.file_name() == own.file_name())
+            .unwrap_or(false);
+        if !is_syncpulse_copy {
+            return DiscordRpcCopyOwnership::Foreign;
+        }
+        return if *pid == own_pid {
+            DiscordRpcCopyOwnership::OrphanOfThisInstance
+        } else {
+            DiscordRpcCopyOwnership::LiveSyncPulseInstance
+        };
+    }
+    DiscordRpcCopyOwnership::Foreign
+}
+
+#[cfg(target_os = "linux")]
+fn linux_discord_rpc_copy_ownership(copy_pid: u32) -> DiscordRpcCopyOwnership {
+    let own_pid = std::process::id();
+    let own_executable = std::env::current_exe().ok();
+    let chain = linux_parent_chain(copy_pid);
+    linux_classify_discord_rpc_copy(own_pid, own_executable.as_deref(), &chain)
+}
+
+/// Stops an unmanaged Discord RPC copy so SyncPulse can own Rich Presence.
+/// Returns `true` once the process is fully gone (or already a zombie).
+#[cfg(target_os = "linux")]
+fn linux_stop_foreign_discord_rpc_copy(pid: u32) -> bool {
+    if !linux_discord_rpc_process_alive(pid) {
+        linux_reap_own_child(pid);
+        return true;
+    }
+    tracing::info!(
+        "Stopping unmanaged Discord RPC copy (PID {pid}) so SyncPulse can own Rich Presence"
+    );
+    // SAFETY: the PID points at a process read from /proc by this user, and
+    // SIGTERM/SIGKILL mirror sysinfo's kill semantics used elsewhere.
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
+    let gone = if linux_wait_until_process_gone(pid, Duration::from_secs(5)) {
+        true
+    } else {
+        tracing::warn!("Discord RPC copy (PID {pid}) ignored SIGTERM; sending SIGKILL");
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        linux_wait_until_process_gone(pid, Duration::from_secs(2))
+    };
+    // If the copy was a direct child of this process (an orphan left behind by
+    // a dead supervisor thread), reap it so it cannot linger as a zombie.
+    linux_reap_own_child(pid);
+    gone
+}
+
+/// Reaps `pid` when it is a direct child of this process. `waitpid` fails with
+/// `ECHILD` for unrelated processes, which is intentionally ignored.
+#[cfg(target_os = "linux")]
+fn linux_reap_own_child(pid: u32) {
+    // SAFETY: waitpid only inspects kernel child state; a null status pointer
+    // is a valid request to discard the exit status.
+    let _ = unsafe { libc::waitpid(pid as libc::pid_t, std::ptr::null_mut(), libc::WNOHANG) };
+}
+
+#[cfg(target_os = "linux")]
+fn linux_wait_until_process_gone(pid: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !linux_discord_rpc_process_alive(pid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !linux_discord_rpc_process_alive(pid)
 }
 
 #[cfg(target_os = "linux")]
@@ -896,19 +1100,35 @@ fn supervise_discord_rpc(
 
         if child.is_none() {
             let other_copy = PluginManager::find_other_discord_rpc_process(&binary);
-            let same_binary_already_running = linux_plugin_process_running(&binary, None);
-            if let Some((pid, executable)) = other_copy {
-                if !warned_about_other_copy {
-                    tracing::warn!("Discord RPC copy already running (PID {pid}: {}); leaving it untouched and waiting before starting SyncPulse's managed copy", executable.display());
-                    warned_about_other_copy = true;
+            let same_path_pid = linux_plugin_process_pid(&binary, None);
+            let foreign_pid = match (other_copy, same_path_pid) {
+                (Some((pid, _)), _) => Some(pid),
+                (None, Some(pid)) => Some(pid),
+                (None, None) => None,
+            };
+            if let Some(pid) = foreign_pid {
+                match linux_discord_rpc_copy_ownership(pid) {
+                    DiscordRpcCopyOwnership::LiveSyncPulseInstance => {
+                        if !warned_about_other_copy {
+                            tracing::warn!("Another SyncPulse instance owns Discord Rich Presence (PID {pid}); leaving it untouched and waiting");
+                            warned_about_other_copy = true;
+                        }
+                        retry_after = Some(Instant::now() + Duration::from_secs(2));
+                    }
+                    DiscordRpcCopyOwnership::OrphanOfThisInstance
+                    | DiscordRpcCopyOwnership::Foreign => {
+                        if !warned_about_other_copy {
+                            tracing::info!("Found an unmanaged Discord RPC copy (PID {pid}); taking it over so SyncPulse can own Rich Presence");
+                            warned_about_other_copy = true;
+                        }
+                        if linux_stop_foreign_discord_rpc_copy(pid) {
+                            retry_after = Some(Instant::now() + Duration::from_secs(1));
+                        } else {
+                            tracing::warn!("Unable to stop the unmanaged Discord RPC copy (PID {pid}); retrying");
+                            retry_after = Some(Instant::now() + Duration::from_secs(2));
+                        }
+                    }
                 }
-                retry_after = Some(Instant::now() + Duration::from_secs(2));
-            } else if same_binary_already_running {
-                if !warned_about_other_copy {
-                    tracing::warn!("A Discord RPC process using SyncPulse's configured binary is already running outside this supervisor; leaving it untouched and waiting");
-                    warned_about_other_copy = true;
-                }
-                retry_after = Some(Instant::now() + Duration::from_secs(2));
             } else if retry_after.map_or(true, |retry| Instant::now() >= retry) {
                 let mut launch_environment: Vec<_> = environment
                     .iter()
@@ -1336,6 +1556,55 @@ mod tests {
     };
     use crate::config::Config;
     use crate::utils::OsArch;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn discord_rpc_copy_ownership_depends_on_the_nearest_syncpulse_ancestor() {
+        use super::{linux_classify_discord_rpc_copy, DiscordRpcCopyOwnership};
+        use std::path::{Path, PathBuf};
+
+        let own_pid = 4242_u32;
+        let own_executable = Path::new("/usr/bin/navidrome-companion");
+        let to_path = |path: &str| Some(PathBuf::from(path));
+
+        // systemd --user (or another user session manager) is the parent: it is
+        // not SyncPulse, so the copy counts as foreign and may be stopped.
+        let foreign = [(804, to_path("/usr/lib/systemd/systemd"))];
+        assert_eq!(
+            linux_classify_discord_rpc_copy(own_pid, Some(own_executable), &foreign),
+            DiscordRpcCopyOwnership::Foreign
+        );
+
+        // A live SyncPulse instance closer in the chain means the copy is
+        // owned by it, even when systemd appears further up.
+        let live_syncpulse = [
+            (
+                4243_u32,
+                to_path("/home/user/src/target/release/navidrome-companion"),
+            ),
+            (804, to_path("/usr/lib/systemd/systemd")),
+        ];
+        assert_eq!(
+            linux_classify_discord_rpc_copy(own_pid, Some(own_executable), &live_syncpulse),
+            DiscordRpcCopyOwnership::LiveSyncPulseInstance
+        );
+
+        // The copy attaching directly to this instance means the supervisor
+        // thread died and left the child behind; it can be reaped.
+        let orphan = [(own_pid, to_path("/usr/bin/navidrome-companion"))];
+        assert_eq!(
+            linux_classify_discord_rpc_copy(own_pid, Some(own_executable), &orphan),
+            DiscordRpcCopyOwnership::OrphanOfThisInstance
+        );
+
+        // Unreadable ancestors (zombie/kernel processes) provide no evidence of
+        // ownership and default to foreign.
+        let unreadable = [(700_u32, None), (699_u32, None)];
+        assert_eq!(
+            linux_classify_discord_rpc_copy(own_pid, Some(own_executable), &unreadable),
+            DiscordRpcCopyOwnership::Foreign
+        );
+    }
 
     #[test]
     fn plugin_release_asset_must_match_os_and_architecture() {

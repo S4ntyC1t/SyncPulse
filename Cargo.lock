@@ -2204,6 +2204,7 @@ dependencies = [
  "directories",
  "flate2",
  "getrandom 0.3.4",
+ "gtk",
  "libc",
  "md-5",
  "regex",

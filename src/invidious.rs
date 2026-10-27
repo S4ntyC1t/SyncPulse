@@ -722,11 +722,22 @@ fn create_compose_file(port: u16, bind_address: &str) -> Result<String> {
     } else {
         format!("{bind_address}:{port}:3000")
     };
+    // Docker copies the host's /etc/resolv.conf into each container when it is
+    // created. If the host's DNS later changes (VPN toggled, NetworkManager
+    // rewrites resolv.conf), a container that is never recreated keeps the now
+    // dead upstream servers, fails to resolve youtube.com and returns
+    // "500 Internal Server Error" as plain text. Invidious then fails to parse
+    // it and reports "Unexpected char 'I' at line 1, column 1". Pinning the
+    // upstream resolvers makes the deployment independent of host churn; the
+    // embedded 127.0.0.11 resolver still handles service-name lookups.
     Ok(format!(
         r#"services:
   invidious:
     image: quay.io/invidious/invidious:latest
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 9.9.9.9
     ports:
       - "{port_mapping}"
     environment:
@@ -762,6 +773,9 @@ fn create_compose_file(port: u16, bind_address: &str) -> Result<String> {
     environment:
       SERVER_SECRET_KEY: "{companion_key}"
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 9.9.9.9
     cap_drop:
       - ALL
     read_only: true
@@ -853,6 +867,11 @@ mod tests {
         assert!(!compose.contains("CHANGE_ME"));
         assert_eq!(compose.matches("SERVER_SECRET_KEY: \"").count(), 1);
         assert!(compose.contains("init-invidious-db.sh:ro"));
+        // Invidious and its companion must pin upstream DNS so the deployment
+        // survives a host resolv.conf change instead of returning plain-text
+        // "500 Internal Server Error" that Invidious cannot parse as JSON.
+        assert_eq!(compose.matches("\n    dns:\n").count(), 2);
+        assert!(compose.contains("      - 1.1.1.1\n"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod browser;
+mod children;
 mod config;
 mod desktop;
 mod discovery;
@@ -10,7 +11,9 @@ mod invidious;
 mod network;
 mod plugins;
 mod process;
+mod service_window;
 mod utils;
+mod webkit_governor;
 mod webview_compat;
 
 use std::fs::{File, OpenOptions};
@@ -23,7 +26,9 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::{Local, Timelike};
 use serde::Serialize;
-use tauri::{image::Image, AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{image::Image, AppHandle, Emitter, Manager, State};
+#[cfg(not(target_os = "linux"))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 use tracing_subscriber::fmt::writer::MakeWriter;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -35,8 +40,8 @@ use invidious::{InvidiousAppSettings, InvidiousManager, InvidiousProgress};
 use plugins::{DiscordRpcConfig, PluginManager, PluginProgress};
 use process::ProcessManager;
 
-#[derive(Clone, Copy)]
-enum ServiceWindow {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServiceWindow {
     Navidrome,
     Invidious,
 }
@@ -50,28 +55,28 @@ impl ServiceWindow {
         }
     }
 
-    fn id(self) -> &'static str {
+    pub(crate) fn id(self) -> &'static str {
         match self {
             Self::Navidrome => "org.navidromehub.syncpulse.navidrome",
             Self::Invidious => "org.navidromehub.syncpulse.invidious",
         }
     }
 
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Navidrome => "navidrome-service",
             Self::Invidious => "invidious-service",
         }
     }
 
-    fn title(self) -> &'static str {
+    pub(crate) fn title(self) -> &'static str {
         match self {
             Self::Navidrome => "Navidrome",
             Self::Invidious => "Invidious",
         }
     }
 
-    fn icon(self) -> &'static [u8] {
+    pub(crate) fn icon(self) -> &'static [u8] {
         match self {
             Self::Navidrome => include_bytes!("../icons/navidrome.png"),
             Self::Invidious => include_bytes!("../icons/invidious.png"),
@@ -114,6 +119,10 @@ impl<'a> MakeWriter<'a> for SharedLogWriter {
 struct AppState {
     runtime: Mutex<RuntimeState>,
     system: Mutex<sysinfo::System>,
+    /// Cached `inspect_system_setup` result with the instant it was produced.
+    /// Building it spawns `docker`/`podman`/`tailscale` and probes the network,
+    /// which must not run on every dashboard poll.
+    system_setup: Mutex<Option<(std::time::Instant, SystemSetupStatus)>>,
     discoverer: Discoverer,
     installer: Installer,
     downloader: Downloader,
@@ -149,12 +158,44 @@ impl AppState {
         }
         Self {
             runtime: Mutex::new(RuntimeState { config, processes }),
-            system: Mutex::new(sysinfo::System::new_all()),
+            // Dashboard metrics do not need a second full process-table scan.
+            system: Mutex::new(sysinfo::System::new_with_specifics(
+                sysinfo::RefreshKind::nothing()
+                    .with_cpu(sysinfo::CpuRefreshKind::everything())
+                    .with_memory(sysinfo::MemoryRefreshKind::everything()),
+            )),
+            system_setup: Mutex::new(None),
             discoverer: Discoverer::new(),
             installer,
             downloader: Downloader::new(),
             invidious: InvidiousManager::new(),
             plugins,
+        }
+    }
+
+    /// Returns the system setup status, reusing a recent result. The probe
+    /// spawns external commands, so the dashboard's short poll interval must not
+    /// rebuild it every time; the cache is dropped after `TTL`.
+    fn system_setup(&self) -> SystemSetupStatus {
+        const TTL: Duration = Duration::from_secs(45);
+        if let Ok(mut cache) = self.system_setup.lock() {
+            if let Some((created, status)) = cache.as_ref() {
+                if created.elapsed() < TTL {
+                    return status.clone();
+                }
+            }
+            let status = inspect_system_setup();
+            *cache = Some((std::time::Instant::now(), status.clone()));
+            return status;
+        }
+        inspect_system_setup()
+    }
+
+    /// Forces the next `system_setup` call to re-probe (used after installing
+    /// packages, when the wizard needs fresh information).
+    fn invalidate_system_setup(&self) {
+        if let Ok(mut cache) = self.system_setup.lock() {
+            *cache = None;
         }
     }
 }
@@ -183,7 +224,7 @@ struct Dashboard {
     ffmpeg_available: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SystemSetupStatus {
     supported: bool,
@@ -386,14 +427,18 @@ fn inspect_system_setup() -> SystemSetupStatus {
 
 #[tauri::command]
 async fn install_system_dependencies(
+    state: State<'_, AppState>,
     engine: String,
     include_tailscale: bool,
 ) -> Result<DependencyInstallResult, String> {
-    tokio::task::spawn_blocking(move || {
+    let result = tokio::task::spawn_blocking(move || {
         install_system_dependencies_blocking(engine, include_tailscale)
     })
     .await
-    .map_err(|error| format!("Dependency installer task failed: {error}"))?
+    .map_err(|error| format!("Dependency installer task failed: {error}"))??;
+    // The probe result is stale now that packages or services changed.
+    state.invalidate_system_setup();
+    Ok(result)
 }
 
 fn install_system_dependencies_blocking(
@@ -601,7 +646,7 @@ async fn dashboard(state: State<'_, AppState>) -> Result<Dashboard, String> {
             .display()
             .to_string()
     });
-    let system_setup = inspect_system_setup();
+    let system_setup = state.inner().system_setup();
     Ok(Dashboard {
         first_run: !config.setup_completed,
         navidrome: NavidromeState {
@@ -1350,14 +1395,14 @@ async fn validate_invidious_compose(state: State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command]
-async fn open_navidrome(state: State<'_, AppState>) -> Result<(), String> {
+async fn open_navidrome(state: State<'_, AppState>) -> Result<String, String> {
     let (port, host) = configured_service_endpoint(&state, true)?;
     ensure_navidrome_reachable(&state, &host, port).await?;
     spawn_service_window(ServiceWindow::Navidrome, &host, port)
 }
 
 #[tauri::command]
-async fn open_invidious(state: State<'_, AppState>) -> Result<(), String> {
+async fn open_invidious(state: State<'_, AppState>) -> Result<String, String> {
     let (port, host) = configured_service_endpoint(&state, false)?;
     ensure_invidious_reachable(&state, &host, port).await?;
     spawn_service_window(ServiceWindow::Invidious, &host, port)
@@ -1421,10 +1466,21 @@ async fn ensure_invidious_reachable(state: &AppState, host: &str, port: u16) -> 
     }
 }
 
-fn spawn_service_window(service: ServiceWindow, host: &str, port: u16) -> Result<(), String> {
+fn spawn_service_window(service: ServiceWindow, host: &str, port: u16) -> Result<String, String> {
     // Each service opens in SyncPulse's own native system WebView (WebKitGTK on
     // Linux, WebView2 on Windows). The window runs as a separate standalone
     // process with its own application ID; no Chromium/Electron is involved.
+    //
+    // Only one window per service is kept: a running standalone WebView holds
+    // its own WebKit processes (hundreds of megabytes), so opening a second one
+    // for the same service is refused instead of silently piling up memory.
+    if children::tag_running(service.label()) {
+        tracing::info!(
+            "{} window is already open; focusing the existing window is not possible, skipping a new one",
+            service.title()
+        );
+        return Ok(format!("{} window is already open", service.title()));
+    }
     let executable = std::env::current_exe()
         .map_err(|error| format!("Unable to locate the SyncPulse executable: {error}"))?;
     if !executable.is_file() {
@@ -1434,6 +1490,7 @@ fn spawn_service_window(service: ServiceWindow, host: &str, port: u16) -> Result
             service.title()
         ));
     }
+    let label = service.label();
     Command::new(executable)
         .args([
             "--syncpulse-service",
@@ -1445,8 +1502,9 @@ fn spawn_service_window(service: ServiceWindow, host: &str, port: u16) -> Result
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("Unable to start the {} window: {error}", service.title()))
+        .map(|child| children::track_tagged(label, child))
+        .map_err(|error| format!("Unable to start the {} window: {error}", service.title()))?;
+    Ok(format!("Opening the {} window", service.title()))
 }
 
 fn service_window_args() -> Result<Option<(ServiceWindow, String, u16)>, String> {
@@ -1476,8 +1534,6 @@ fn service_window_args() -> Result<Option<(ServiceWindow, String, u16)>, String>
 }
 
 fn run_service_window(service: ServiceWindow, host: String, port: u16) -> Result<(), String> {
-    desktop::set_linux_application_id(service.id());
-    webview_compat::apply_linux_webview_env();
     let host = if host == "configured" {
         let config = config::load();
         let managed = match service {
@@ -1496,12 +1552,32 @@ fn run_service_window(service: ServiceWindow, host: String, port: u16) -> Result
     };
     let url = url::Url::parse(&format!("http://{host}:{port}/"))
         .map_err(|error| format!("Invalid local address for {}: {error}", service.title()))?;
+
+    // On Linux the service shell is hosted directly on GTK + WebKitGTK so
+    // SyncPulse can govern the WebKit context (memory budget, cache model,
+    // feature set) and skip the Tauri/tao/wry runtime entirely.
+    #[cfg(target_os = "linux")]
+    {
+        service_window::run(service, url)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        run_tauri_service_window(service, url)
+    }
+}
+
+/// Non-Linux fallback: let Tauri host the service window (WebView2 on Windows).
+#[cfg(not(target_os = "linux"))]
+fn run_tauri_service_window(service: ServiceWindow, url: url::Url) -> Result<(), String> {
+    desktop::set_linux_application_id(service.id());
+    webview_compat::apply_linux_webview_env();
     let icon = Image::from_bytes(service.icon())
         .map_err(|error| format!("Unable to load the {} icon: {error}", service.title()))?;
     let mut context = tauri::generate_context!();
     let config = context.config_mut();
     config.identifier = service.id().to_owned();
-    config.app.enable_gtk_app_id = true;
+    config.app.enable_gtk_app_id = false;
     for window in &mut config.app.windows {
         window.create = false;
     }
@@ -1513,7 +1589,7 @@ fn run_service_window(service: ServiceWindow, host: String, port: u16) -> Result
     context.set_default_window_icon(Some(icon.clone()));
     tauri::Builder::default()
         .setup(move |app| {
-            let window = WebviewWindowBuilder::new(app, service.label(), WebviewUrl::External(url))
+            WebviewWindowBuilder::new(app, service.label(), WebviewUrl::External(url))
                 .title(service.title())
                 .inner_size(1100.0, 760.0)
                 .min_inner_size(720.0, 520.0)
@@ -1531,22 +1607,6 @@ fn run_service_window(service: ServiceWindow, host: String, port: u16) -> Result
                 .map_err(std::io::Error::other)?
                 .build()
                 .map_err(std::io::Error::other)?;
-
-            #[cfg(target_os = "linux")]
-            window
-                .with_webview(move |webview| {
-                    if matches!(service, ServiceWindow::Invidious) {
-                        if let Err(error) =
-                            webview_compat::disable_service_window_media_session(&webview.inner())
-                        {
-                            tracing::warn!(
-                                "Unable to disable WebKit MPRIS integration for Invidious: {error}"
-                            );
-                        }
-                    }
-                })
-                .map_err(std::io::Error::other)?;
-
             Ok(())
         })
         .run(context)
@@ -1595,6 +1655,8 @@ fn start_schedule_loop(app: AppHandle) {
 fn main() {
     webview_compat::apply_linux_webview_env();
     init_logging();
+    children::start_reaper();
+    utils::start_memory_maintenance();
 
     match service_window_args() {
         Ok(Some((service, host, port))) => {
@@ -1673,6 +1735,15 @@ fn main() {
                 .ok_or("SyncPulse main window was not found")?;
             let icon = Image::from_bytes(include_bytes!("../icons/syncpulse.png"))?;
             main_window.set_icon(icon)?;
+            #[cfg(target_os = "linux")]
+            main_window
+                .with_webview(|webview| {
+                    webkit_governor::tune_webview(
+                        &webview.inner(),
+                        webkit_governor::WebKitRole::ControlUi,
+                    );
+                })
+                .map_err(std::io::Error::other)?;
             start_schedule_loop(app.handle().clone());
             Ok(())
         })

@@ -125,9 +125,16 @@ While SyncPulse is open, its background supervisor starts the integration
 independently of Discord or Navidrome windows, restarts it if it exits, and
 restarts the bridge when Discord's IPC socket is recreated. Closing Discord or
 Navidrome does not stop the SyncPulse-owned RPC process; it exits when SyncPulse
-exits. Do not run another copy of the RPC executable or enable its separate
-systemd service at the same time: SyncPulse will report a conflict rather than
-kill a process it does not own.
+exits.
+
+On Linux the supervisor also resolves ownership conflicts by itself. An
+unmanaged copy (a stale autostart entry, a leftover systemd service, a debug
+build started in a terminal) is stopped with `SIGTERM`, then `SIGKILL` if it
+ignores that, so the managed copy can start without manual cleanup. A copy that
+belongs to another, still-running SyncPulse instance is left untouched, since
+that instance already owns Rich Presence; opening Discord Rich Presence from a
+second instance simply waits. Zombie helpers left behind by older runs are
+reaped automatically instead of lingering as `<defunct>` processes.
 
 Album art defaults to **Off**. Discord fetches images from its own servers and
 cannot reach localhost:
@@ -186,9 +193,17 @@ On Linux, building requires GTK 3 and WebKitGTK 4.1 development packages.
 The `web/` directory contains the complete frontend; Rust commands provide
 the native service-management bridge.
 
-SyncPulse runs natively on Wayland through GTK/WebKitGTK. On NVIDIA GPUs it
-sets `__NV_DISABLE_EXPLICIT_SYNC=1` (unless already set) so the accelerated
-DMA-BUF renderer can stay enabled. Do **not** set
+SyncPulse uses GTK/WebKitGTK. On NVIDIA GPUs it sets
+`__NV_DISABLE_EXPLICIT_SYNC=1` (unless already set) so the accelerated DMA-BUF
+renderer can stay enabled. It does **not** override the GTK backend: in a
+Wayland session WebKitGTK renders natively, which is the path the standalone
+service windows use as well. Forcing `GDK_BACKEND=x11` routed the main window
+through XWayland and produced a blank window on NVIDIA/KWin, so it is not set
+automatically. On NVIDIA GPUs SyncPulse additionally disables WebKitGTK's GL
+video sink (`WEBKIT_GST_DISABLE_GL_SINK=1`) so video in the Invidious window is
+handled through system memory; the GL sink imports the decoded NV12 buffer as an
+EGLImage with a mismatched format and renders green frames (WebKit bugs #260654
+and #261874). Set the variable yourself beforehand to override this. Do **not** set
 `WEBKIT_DISABLE_DMABUF_RENDERER=1` for performance: it avoids some crashes but
 forces a slow shared-memory path that makes Navidrome/Invidious feel laggy.
 Only enable it when WebKit otherwise crashes, via
