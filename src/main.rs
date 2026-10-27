@@ -8,6 +8,8 @@ mod discovery;
 mod downloader;
 mod installer;
 mod invidious;
+#[cfg(target_os = "linux")]
+mod native_player;
 mod network;
 mod plugins;
 mod process;
@@ -1671,6 +1673,19 @@ fn main() {
             tracing::error!("{error}");
             std::process::exit(2);
         }
+    }
+
+    // Pilot: a fully native player window (no embedded browser engine).
+    #[cfg(target_os = "linux")]
+    if std::env::args()
+        .skip(1)
+        .any(|arg| arg == "--syncpulse-player")
+    {
+        if let Err(error) = native_player::run() {
+            tracing::error!("{error}");
+            std::process::exit(1);
+        }
+        return;
     }
 
     desktop::set_linux_application_id("org.navidromehub.syncpulse");
