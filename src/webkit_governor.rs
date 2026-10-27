@@ -53,8 +53,8 @@ impl MemoryProfile {
     pub(crate) fn for_role(role: WebKitRole, total_mb: u64) -> Self {
         let total_mb = total_mb.max(1) as f64;
         let (fraction, floor, ceiling) = match role {
-            WebKitRole::ControlUi => (0.04, 384.0, 1024.0),
-            WebKitRole::Service => (0.06, 768.0, 2048.0),
+            WebKitRole::ControlUi => (0.02, 256.0, 512.0),
+            WebKitRole::Service => (0.035, 512.0, 1024.0),
         };
         Self {
             memory_limit_mb: (total_mb * fraction).clamp(floor, ceiling) as u32,
@@ -174,12 +174,12 @@ mod tests {
         // And the floor/ceiling always bound it.
         for total in [512, 2048, 4096, 16_384, 131_072] {
             let limits = profile(WebKitRole::Service, total).memory_limit_mb;
-            assert!((768..=2048).contains(&limits));
+            assert!((512..=1024).contains(&limits));
             let ui = profile(WebKitRole::ControlUi, total).memory_limit_mb;
-            assert!((384..=1024).contains(&ui));
+            assert!((256..=512).contains(&ui));
             // Even the smallest budget stays far above the kill fraction of a
             // realistic Navidrome/Invidious working set.
-            assert!(limits >= 768);
+            assert!(limits >= 512);
         }
     }
 

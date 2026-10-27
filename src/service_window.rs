@@ -22,8 +22,9 @@ use crate::ServiceWindow;
 use gtk::prelude::*;
 use gtk::{gdk_pixbuf, gio};
 use webkit2gtk::{
-    URIRequestExt, UserContentInjectedFrames, UserContentManager, UserContentManagerExt,
-    UserScript, UserScriptInjectionTime, WebContext, WebView, WebViewExt, WebsiteDataManager,
+    SettingsExt, URIRequestExt, UserContentInjectedFrames, UserContentManager,
+    UserContentManagerExt, UserScript, UserScriptInjectionTime, WebContext, WebView, WebViewExt,
+    WebsiteDataManager,
 };
 
 /// Run the standalone service window. Blocks on the GTK main loop until the
@@ -67,8 +68,11 @@ fn build_window(
     let settings = WebViewExt::settings(&webview)
         .ok_or_else(|| format!("Unable to read WebKit settings for {}", service.title()))?;
     webkit_governor::apply_settings(&settings, WebKitRole::Service);
+    if crate::webview_compat::console_logging_enabled() {
+        settings.set_enable_write_console_messages_to_stdout(true);
+    }
 
-    install_initialization_script(&webview, service);
+    install_initialization_scripts(&webview, service);
     open_external_links_in_browser(&webview);
     if service == ServiceWindow::Invidious {
         match crate::webview_compat::disable_webkit_features(
@@ -150,13 +154,7 @@ fn service_icon(service: ServiceWindow) -> Result<gdk_pixbuf::Pixbuf, String> {
         .map_err(|error| format!("Unable to load the {} icon: {error}", service.title()))
 }
 
-fn install_initialization_script(webview: &WebView, service: ServiceWindow) {
-    let source = match service {
-        ServiceWindow::Navidrome => {
-            crate::webview_compat::navidrome_paused_volume_workaround_script()
-        }
-        ServiceWindow::Invidious => crate::webview_compat::service_window_init_script(),
-    };
+fn install_initialization_scripts(webview: &WebView, service: ServiceWindow) {
     let manager: UserContentManager = match webview.user_content_manager() {
         Some(manager) => manager,
         None => {
@@ -164,14 +162,30 @@ fn install_initialization_script(webview: &WebView, service: ServiceWindow) {
             return;
         }
     };
-    let script = UserScript::new(
-        source,
-        UserContentInjectedFrames::TopFrame,
-        UserScriptInjectionTime::Start,
-        &[],
-        &[],
-    );
-    manager.add_script(&script);
+    let scripts = match service {
+        ServiceWindow::Navidrome => crate::webview_compat::navidrome_init_scripts(),
+        ServiceWindow::Invidious => crate::webview_compat::invidious_init_scripts(),
+    };
+    for source in scripts {
+        let script = UserScript::new(
+            source,
+            UserContentInjectedFrames::TopFrame,
+            UserScriptInjectionTime::Start,
+            &[],
+            &[],
+        );
+        manager.add_script(&script);
+    }
+    if crate::webview_compat::console_logging_enabled() {
+        let diagnostic = UserScript::new(
+            crate::webview_compat::diagnostic_script(),
+            UserContentInjectedFrames::TopFrame,
+            UserScriptInjectionTime::Start,
+            &[],
+            &[],
+        );
+        manager.add_script(&diagnostic);
+    }
 }
 
 /// Send `target="_blank"` / `window.open` requests to the user's browser instead

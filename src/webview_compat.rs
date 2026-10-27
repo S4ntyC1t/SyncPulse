@@ -86,6 +86,145 @@ pub fn service_window_init_script() -> &'static str {
 })();"#
 }
 
+/// Keep a service window's page from pulling and decoding every image at once.
+///
+/// Navidrome and Invidious render an artwork bitmap per item. On a large
+/// library those decoded bitmaps dominate the `WebKitWebProcess` footprint, and
+/// the web app often omits `loading="lazy"` on the main grid. Marking every
+/// image lazy keeps off-screen artwork from ever being fetched or decoded, and
+/// asynchronous decoding keeps the decode work off the main thread.
+pub fn service_lazy_images_script() -> &'static str {
+    r#"(function () {
+  if (window.__syncPulseLazyImages) return;
+  window.__syncPulseLazyImages = true;
+
+  function tune(img) {
+    if (img.dataset.syncPulseLazy) return;
+    img.dataset.syncPulseLazy = "1";
+    if (!img.hasAttribute("loading")) img.setAttribute("loading", "lazy");
+    if (!img.hasAttribute("decoding")) img.setAttribute("decoding", "async");
+  }
+
+  function scan(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node.tagName === "IMG") tune(node);
+    if (node.querySelectorAll) {
+      node.querySelectorAll("img").forEach(tune);
+    }
+  }
+
+  new MutationObserver(function (mutations) {
+    for (var i = 0; i < mutations.length; i++) {
+      var added = mutations[i].addedNodes;
+      for (var j = 0; j < added.length; j++) scan(added[j]);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  scan(document.documentElement);
+})();"#
+}
+
+/// Adapt Navidrome's *own* interface instead of replacing it.
+///
+/// Navidrome parses the JSON in `window.__APP_CONFIG__` at startup, so
+/// intercepting that assignment is enough to (a) shrink cover art — decoded
+/// bitmap memory grows with the square of the requested size — and (b) drop the
+/// cover animations. The layout, playlists, and every other feature stay
+/// exactly as Navidrome ships them.
+///
+/// 240 px is a deliberate compromise: Navidrome's album grid draws ~150 px
+/// cards (and its large player cover 192 px), so 240 px still fills a HiDPI
+/// card without upscaling, while using ~36% fewer pixels than the 300 px
+/// default — and cover art requested at 300 px was being upscaled anyway.
+pub fn navidrome_config_overrides_script() -> &'static str {
+    r#"(function () {
+  if (window.__syncPulseConfigPatched) return;
+  window.__syncPulseConfigPatched = true;
+  var stored;
+  try {
+    Object.defineProperty(window, "__APP_CONFIG__", {
+      configurable: true,
+      enumerable: true,
+      get: function () { return stored; },
+      set: function (value) {
+        try {
+          var config = JSON.parse(value);
+          if (!config.uiCoverArtSize || config.uiCoverArtSize > 240) {
+            config.uiCoverArtSize = 240;
+          }
+          config.enableCoverAnimation = false;
+          stored = JSON.stringify(config);
+        } catch (_) {
+          stored = value;
+        }
+      }
+    });
+  } catch (_) {}
+})();"#
+}
+
+/// Initialization scripts for the Navidrome window, in injection order.
+///
+/// Navidrome keeps its stock interface: SyncPulse only adapts it (smaller,
+/// lazy cover art) and applies the existing playback workaround.
+pub fn navidrome_init_scripts() -> Vec<&'static str> {
+    vec![
+        navidrome_config_overrides_script(),
+        service_lazy_images_script(),
+        navidrome_paused_volume_workaround_script(),
+    ]
+}
+
+/// Initialization scripts for the Invidious window, in injection order.
+pub fn invidious_init_scripts() -> Vec<&'static str> {
+    vec![service_lazy_images_script(), service_window_init_script()]
+}
+
+/// Whether WebKit should echo page `console` output to the process stdout.
+///
+/// Opt-in via `SYNCPULSE_WEBKIT_CONSOLE`; lets SyncPulse verify that its
+/// initialization scripts actually ran without enabling the developer tools
+/// (which stay off to keep the debug machinery out of the release build).
+pub fn console_logging_enabled() -> bool {
+    std::env::var_os("SYNCPULSE_WEBKIT_CONSOLE").is_some()
+}
+
+/// One-shot report of what the page actually ended up with: the effective
+/// cover-art size, whether the animation flag survived, and how much artwork
+/// the grid pulled in. Only injected when [`console_logging_enabled`] is set.
+pub fn diagnostic_script() -> &'static str {
+    r#"(function () {
+  function report(tag) {
+    var config = null;
+    try { config = JSON.parse(window.__APP_CONFIG__); } catch (_) {}
+    var images = document.querySelectorAll("img");
+    var lazy = document.querySelectorAll('img[loading="lazy"]');
+    var sizes = {};
+    for (var i = 0; i < images.length; i++) {
+      var match = /[?&]size=(\d+)/.exec(images[i].currentSrc || images[i].src || "");
+      if (match) sizes[match[1]] = (sizes[match[1]] || 0) + 1;
+    }
+    console.log("[syncpulse] " + tag +
+      " url=" + location.pathname +
+      " title=" + JSON.stringify(document.title) +
+      " uiCoverArtSize=" + (config ? config.uiCoverArtSize : "?") +
+      " enableCoverAnimation=" + (config ? config.enableCoverAnimation : "?") +
+      " imgs=" + images.length + " lazy=" + lazy.length +
+      " coverSizes=" + JSON.stringify(sizes));
+    for (var k = 0; k < images.length && k < 4; k++) {
+      console.log("[syncpulse] img[" + k + "]=" +
+        (images[k].currentSrc || images[k].src || "").slice(0, 120));
+    }
+  }
+  function schedule() {
+    setTimeout(function () { report("t+3s"); }, 3000);
+    setTimeout(function () { report("t+8s"); }, 8000);
+  }
+  if (document.readyState === "complete") schedule();
+  else window.addEventListener("load", schedule);
+})();"#
+}
+
 /// WebKitGTK may expose a stale zero volume during Navidrome's pause fade-out.
 /// Preserve that restore value so the player does not persist zero as its new
 /// volume, and retry setting it after playback resumes. Explicit mute/slider

@@ -1589,6 +1589,16 @@ fn run_tauri_service_window(service: ServiceWindow, url: url::Url) -> Result<(),
         service.id()
     );
     context.set_default_window_icon(Some(icon.clone()));
+    let initialization_script = {
+        let mut scripts = match service {
+            ServiceWindow::Navidrome => webview_compat::navidrome_init_scripts(),
+            ServiceWindow::Invidious => webview_compat::invidious_init_scripts(),
+        };
+        if webview_compat::console_logging_enabled() {
+            scripts.push(webview_compat::diagnostic_script());
+        }
+        scripts.join("\n")
+    };
     tauri::Builder::default()
         .setup(move |app| {
             WebviewWindowBuilder::new(app, service.label(), WebviewUrl::External(url))
@@ -1599,12 +1609,7 @@ fn run_tauri_service_window(service: ServiceWindow, url: url::Url) -> Result<(),
                 .skip_taskbar(false)
                 .visible(true)
                 .zoom_hotkeys_enabled(false)
-                .initialization_script(match service {
-                    ServiceWindow::Navidrome => {
-                        webview_compat::navidrome_paused_volume_workaround_script()
-                    }
-                    ServiceWindow::Invidious => webview_compat::service_window_init_script(),
-                })
+                .initialization_script(initialization_script)
                 .icon(icon.clone())
                 .map_err(std::io::Error::other)?
                 .build()
