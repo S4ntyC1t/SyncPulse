@@ -937,6 +937,11 @@ document.addEventListener("click", async (event) => {
         if (message) toast(message);
         break;
       }
+      case "open-navidrome-client": {
+        const message = await invoke("open_navidrome_client");
+        if (message) toast(message);
+        break;
+      }
       case "open-navidrome-browser": await invoke("open_navidrome_browser"); break;
       case "open-invidious-browser": await invoke("open_invidious_browser"); break;
       case "navidrome-primary": await runNavidromeAction(actionButton); break;

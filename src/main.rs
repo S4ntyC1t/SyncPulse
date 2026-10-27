@@ -1410,6 +1410,40 @@ async fn open_invidious(state: State<'_, AppState>) -> Result<String, String> {
     spawn_service_window(ServiceWindow::Invidious, &host, port)
 }
 
+/// Opens the native Navidrome client: plain GTK widgets driven by the
+/// Subsonic API, without a browser engine.
+#[tauri::command]
+async fn open_navidrome_client() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        spawn_native_client()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("The native client is only available on Linux".to_owned())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_native_client() -> Result<String, String> {
+    // One client at a time: it is a full music player, and a second copy
+    // would fight over the audio device.
+    if children::tag_running("navidrome-client") {
+        return Ok("The native client is already open".to_owned());
+    }
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Unable to locate the SyncPulse executable: {error}"))?;
+    Command::new(executable)
+        .arg("--syncpulse-client")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map(|child| children::track_tagged("navidrome-client", child))
+        .map_err(|error| format!("Unable to start the native client: {error}"))?;
+    Ok("Opening the native client".to_owned())
+}
+
 #[tauri::command]
 async fn open_navidrome_browser(state: State<'_, AppState>) -> Result<(), String> {
     let (port, host) = configured_service_endpoint(&state, true)?;
@@ -1746,6 +1780,7 @@ fn main() {
             save_settings,
             open_navidrome,
             open_invidious,
+            open_navidrome_client,
             open_navidrome_browser,
             open_invidious_browser
         ])
