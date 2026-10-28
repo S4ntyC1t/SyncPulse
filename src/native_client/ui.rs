@@ -20,6 +20,7 @@ use gtk::{gdk_pixbuf, gio, glib};
 use super::api::{
     format_duration, Album, Artist, Playlist, SearchResults, Song, StarKind, Starred, Subsonic,
 };
+use super::mpris::{self, LoopStatus, Status};
 use super::player::{self, Mpv, PlaybackState};
 use super::views;
 use crate::config;
@@ -77,6 +78,11 @@ pub(super) enum Op {
         id: String,
         size: u32,
     },
+    /// Fetch the cover of the current track and store it as a file, so the
+    /// desktop can show it as the album art.
+    NowPlayingCover {
+        id: String,
+    },
     Star {
         kind: StarKind,
         id: String,
@@ -120,6 +126,10 @@ pub(super) enum MsgBody {
     Cover {
         key: String,
         bytes: Vec<u8>,
+    },
+    /// The cover of the current track, stored as a file the desktop may show.
+    CoverFile {
+        path: String,
     },
     Player(PlaybackState),
     Error(String),
@@ -262,6 +272,11 @@ pub(super) struct UiState {
     pub submitted: Cell<bool>,
     /// When the current track was started, used to ignore mpv's pre-load idle.
     pub started_at: Cell<Option<Instant>>,
+    /// True while the desktop asked the player to stop: MPRIS knows that as
+    /// a state of its own, apart from "paused".
+    pub stopped: Cell<bool>,
+    /// How the desktop sees the current track.
+    pub track: RefCell<mpris::Track>,
 }
 
 impl UiState {
@@ -280,6 +295,8 @@ pub(super) struct Ctx {
     pub covers: Covers,
     pub player: Arc<Mpv>,
     pub state: Rc<UiState>,
+    /// The desktop integration: the state it reads and the commands it sends.
+    pub mpris: mpris::Mpris,
     /// Where pages are swapped in.
     pub content: gtk::Box,
     pub sidebar: gtk::ListBox,
@@ -298,6 +315,10 @@ pub(super) struct Ctx {
     /// Guards the progress scale against feedback while it is programmatically
     /// updated.
     pub updating_progress: Cell<bool>,
+    /// Guards the repeat button: GTK3 emits "clicked" when the state of a
+    /// toggle button is set programmatically, so the button would otherwise
+    /// read the update as a click of the user.
+    pub repeat_syncing: Cell<bool>,
     pub generation: Cell<u64>,
     pub nav_programmatic: Cell<bool>,
     /// True while the queue page is the visible one.
@@ -382,6 +403,10 @@ fn build_window(
     let tx = spawn_workers(Arc::clone(api), ui_tx.clone());
     let covers = Covers::new(tx.clone());
 
+    // The desktop media controls: the client shows up in the system tray and
+    // can be driven from there.
+    let mpris = mpris::Mpris::start();
+
     let state = Rc::new(UiState {
         queue: RefCell::new(Queue::default()),
         playing: RefCell::new(None),
@@ -389,6 +414,8 @@ fn build_window(
         repeat: Cell::new(Repeat::Off),
         submitted: Cell::new(false),
         started_at: Cell::new(None),
+        stopped: Cell::new(false),
+        track: RefCell::new(mpris::Track::default()),
     });
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -451,6 +478,7 @@ fn build_window(
         covers: covers.clone(),
         player: Arc::clone(player),
         state,
+        mpris,
         content,
         sidebar,
         status,
@@ -465,6 +493,7 @@ fn build_window(
         repeat_button: bar_widgets.repeat,
         volume: bar_widgets.volume,
         updating_progress: Cell::new(false),
+        repeat_syncing: Cell::new(false),
         generation: Cell::new(0),
         nav_programmatic: Cell::new(false),
         queue_visible: Cell::new(false),
@@ -502,6 +531,11 @@ fn build_window(
         glib::timeout_add_local(Duration::from_millis(40), move || {
             while let Ok(msg) = ui_rx.try_recv() {
                 handle(&ctx, msg);
+            }
+            // The desktop media controls send their commands over the bus;
+            // they are answered here, on the thread that owns the player.
+            for command in ctx.mpris.drain() {
+                handle_mpris(&ctx, command);
             }
             glib::ControlFlow::Continue
         });
@@ -719,6 +753,9 @@ fn wire_player_bar(ctx: &Rc<Ctx>, prev: &gtk::Button, next: &gtk::Button) {
         let ctx = Rc::clone(ctx);
         ctx.volume.clone().connect_value_changed(move |scale| {
             ctx.player.set_volume(scale.value());
+            // The desktop shows the volume too.
+            let volume = (scale.value() / 100.0).clamp(0.0, 1.0);
+            ctx.mpris.publish(|snapshot| snapshot.volume = volume);
         });
     }
     {
@@ -726,6 +763,7 @@ fn wire_player_bar(ctx: &Rc<Ctx>, prev: &gtk::Button, next: &gtk::Button) {
         ctx.shuffle_button.clone().connect_toggled(move |button| {
             let on = button.is_active();
             ctx.state.shuffle.set(on);
+            ctx.mpris.publish(|snapshot| snapshot.shuffle = on);
             if on {
                 ctx.state.queue.borrow_mut().reshuffle();
                 open_queue(&ctx);
@@ -742,16 +780,37 @@ fn wire_player_bar(ctx: &Rc<Ctx>, prev: &gtk::Button, next: &gtk::Button) {
     }
     {
         let ctx = Rc::clone(ctx);
-        ctx.repeat_button.clone().connect_clicked(move |button| {
+        ctx.repeat_button.clone().connect_clicked(move |_| {
+            if ctx.repeat_syncing.get() {
+                // The state was set from the outside, not clicked.
+                return;
+            }
             let next = match ctx.state.repeat.get() {
                 Repeat::Off => Repeat::All,
                 Repeat::All => Repeat::One,
                 Repeat::One => Repeat::Off,
             };
-            ctx.state.repeat.set(next);
-            apply_repeat_button(button, next);
+            set_repeat(&ctx, next);
         });
     }
+}
+
+/// Change the repeat mode and tell the desktop about it.
+fn set_repeat(ctx: &Rc<Ctx>, repeat: Repeat) {
+    ctx.state.repeat.set(repeat);
+    // Setting the state of a toggle button emits "clicked" in GTK3, which
+    // would cycle the mode once more.
+    ctx.repeat_syncing.set(true);
+    apply_repeat_button(&ctx.repeat_button, repeat);
+    ctx.repeat_syncing.set(false);
+
+    let loop_status = match repeat {
+        Repeat::Off => LoopStatus::None,
+        Repeat::All => LoopStatus::Playlist,
+        Repeat::One => LoopStatus::Track,
+    };
+    ctx.mpris
+        .publish(|snapshot| snapshot.loop_status = loop_status);
 }
 fn apply_repeat_button(button: &gtk::ToggleButton, repeat: Repeat) {
     let (icon, tooltip) = match repeat {
@@ -878,6 +937,7 @@ fn handle(ctx: &Rc<Ctx>, msg: Msg) {
     match msg.body {
         MsgBody::Player(state) => handle_player(ctx, state),
         MsgBody::Cover { key, bytes } => ctx.covers.deliver(&key, &bytes),
+        MsgBody::CoverFile { path } => handle_cover_file(ctx, &path),
         MsgBody::Error(error) => {
             ctx.set_status(&format!("Ошибка: {error}"));
             tracing::warn!("client: {error}");
@@ -1090,6 +1150,7 @@ pub(super) fn toggle_playback(ctx: &Rc<Ctx>) {
         }
         return;
     }
+    ctx.state.stopped.set(false);
     ctx.player.set_paused(!ctx.player.paused());
 }
 
@@ -1106,6 +1167,7 @@ fn start_song(ctx: &Rc<Ctx>, song: Song) {
     *ctx.state.playing.borrow_mut() = Some(song.clone());
     ctx.state.submitted.set(false);
     ctx.state.started_at.set(Some(Instant::now()));
+    ctx.state.stopped.set(false);
 
     ctx.bar_title.set_text(&song.title);
     ctx.bar_artist.set_text(&song.subtitle());
@@ -1115,7 +1177,22 @@ fn start_song(ctx: &Rc<Ctx>, song: Song) {
     if !song.cover_art.is_empty() {
         ctx.covers
             .get_sized(&ctx.bar_cover, &song.cover_art, COVER_BAR);
+        // The desktop shows the album art of the current track; it needs a
+        // file it can read on its own.
+        ctx.send_untagged(Op::NowPlayingCover {
+            id: song.cover_art.clone(),
+        });
     }
+
+    // Tell the desktop what is playing.
+    let track = mpris::Track::of(&song);
+    *ctx.state.track.borrow_mut() = track.clone();
+    ctx.mpris.publish(|snapshot| {
+        snapshot.metadata = track.metadata.clone();
+        snapshot.track_id = track.id.clone();
+        snapshot.status = Status::Playing;
+        snapshot.position = 0;
+    });
 
     if let Err(error) = ctx.player.play(&ctx.api.stream_url(&song.id)) {
         ctx.set_status(&format!("Не удалось воспроизвести: {error}"));
@@ -1164,6 +1241,9 @@ fn handle_player(ctx: &Rc<Ctx>, state: PlaybackState) {
         gtk::IconSize::Button,
     )));
 
+    // Publish the playback state for the desktop media controls.
+    publish_playback(ctx, &state);
+
     let Some(song) = ctx.state.current() else {
         return;
     };
@@ -1189,6 +1269,103 @@ fn handle_player(ctx: &Rc<Ctx>, state: PlaybackState) {
     if loaded && state.idle && !state.paused {
         advance(ctx, 1);
     }
+}
+
+/// Tell the desktop media controls what the player is doing.
+fn publish_playback(ctx: &Rc<Ctx>, state: &PlaybackState) {
+    let status = if ctx.state.current().is_none() || ctx.state.stopped.get() {
+        Status::Stopped
+    } else if state.paused {
+        Status::Paused
+    } else {
+        Status::Playing
+    };
+    // MPRIS measures the position in microseconds.
+    let position = (state.position.max(0.0) * 1_000_000.0) as i64;
+    // The volume scale runs from 0 to 100, MPRIS expects 0 to 1.
+    let volume = (ctx.volume.value() / 100.0).clamp(0.0, 1.0);
+    let queued = ctx.state.queue.borrow().len() > 1;
+    let shuffle = ctx.state.shuffle.get();
+    let loop_status = match ctx.state.repeat.get() {
+        Repeat::Off => LoopStatus::None,
+        Repeat::All => LoopStatus::Playlist,
+        Repeat::One => LoopStatus::Track,
+    };
+
+    ctx.mpris.publish(|snapshot| {
+        snapshot.status = status;
+        snapshot.position = position;
+        snapshot.volume = volume;
+        snapshot.can_go_next = queued;
+        snapshot.can_go_previous = queued;
+        snapshot.shuffle = shuffle;
+        snapshot.loop_status = loop_status;
+    });
+}
+
+/// Act on a command the desktop sent over MPRIS.
+fn handle_mpris(ctx: &Rc<Ctx>, command: mpris::Command) {
+    match command {
+        mpris::Command::Play => {
+            ctx.state.stopped.set(false);
+            if ctx.state.current().is_none() {
+                play_cursor(ctx);
+            } else if ctx.player.paused() {
+                ctx.player.set_paused(false);
+            }
+        }
+        mpris::Command::Pause => ctx.player.set_paused(true),
+        mpris::Command::PlayPause => toggle_playback(ctx),
+        mpris::Command::Stop => {
+            // "Stopped" is a state of its own in MPRIS: the desktop shows the
+            // player as idle, but the track is kept.
+            ctx.state.stopped.set(true);
+            ctx.player.set_paused(true);
+        }
+        mpris::Command::Next => {
+            ctx.state.stopped.set(false);
+            advance(ctx, 1);
+        }
+        mpris::Command::Previous => {
+            ctx.state.stopped.set(false);
+            advance(ctx, -1);
+        }
+        mpris::Command::Seek(offset) => {
+            let position = ctx.player.position() + offset as f64 / 1_000_000.0;
+            ctx.player.seek(position.max(0.0));
+        }
+        mpris::Command::SetPosition(position) => {
+            ctx.player.seek((position as f64 / 1_000_000.0).max(0.0));
+        }
+        mpris::Command::SetVolume(volume) => {
+            let volume = volume.clamp(0.0, 1.0);
+            ctx.player.set_volume(volume);
+            ctx.volume.set_value(volume * 100.0);
+        }
+        mpris::Command::SetShuffle(on) => {
+            ctx.state.shuffle.set(on);
+            ctx.shuffle_button.set_active(on);
+        }
+        mpris::Command::SetLoopStatus(status) => {
+            let repeat = match status {
+                LoopStatus::None => Repeat::Off,
+                LoopStatus::Track => Repeat::One,
+                LoopStatus::Playlist => Repeat::All,
+            };
+            set_repeat(ctx, repeat);
+        }
+        mpris::Command::Raise => ctx.window.present(),
+        mpris::Command::Quit => ctx.window.close(),
+    }
+}
+
+/// The cover of the current track arrived: show it to the desktop.
+fn handle_cover_file(ctx: &Rc<Ctx>, path: &str) {
+    let track = ctx.state.track.borrow().clone();
+    let track = track.with_art(if path.is_empty() { None } else { Some(path) });
+    *ctx.state.track.borrow_mut() = track.clone();
+    ctx.mpris
+        .publish(|snapshot| snapshot.metadata = track.metadata.clone());
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,6 +1480,25 @@ impl Covers {
 
 fn cover_key(cover_id: &str, size: u32) -> String {
     format!("{cover_id}@{size}")
+}
+
+/// Store the cover art in the cache directory.
+///
+/// The desktop cannot show an image that needs a login, so the cover of the
+/// current track is written to a file and handed over as a `file://` URL.
+fn write_cover(bytes: &[u8]) -> Result<String, String> {
+    let dir = config::cache_dir();
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let extension = if bytes.starts_with(b"\x89PNG") {
+        "png"
+    } else {
+        "jpg"
+    };
+    let path = dir.join(format!("now-playing.{extension}"));
+    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
+    let url = url::Url::from_file_path(&path)
+        .map_err(|_| format!("{} is not a file path", path.display()))?;
+    Ok(url.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -1530,6 +1726,23 @@ fn perform(api: &Subsonic, op: Op) -> MsgBody {
                 MsgBody::Cover {
                     key,
                     bytes: Vec::new(),
+                }
+            }
+        },
+        Op::NowPlayingCover { id } => match api.cover_bytes(&id, 512) {
+            Ok(bytes) => match write_cover(&bytes) {
+                Ok(path) => MsgBody::CoverFile { path },
+                Err(error) => {
+                    tracing::warn!("client: cover file failed: {error}");
+                    MsgBody::CoverFile {
+                        path: String::new(),
+                    }
+                }
+            },
+            Err(error) => {
+                tracing::warn!("client: now playing cover failed: {error}");
+                MsgBody::CoverFile {
+                    path: String::new(),
                 }
             }
         },

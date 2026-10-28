@@ -185,6 +185,23 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+/// The directory for cached files (the cover art the desktop shows, ...).
+pub fn cache_dir() -> PathBuf {
+    let proj = project_dirs();
+    if let Some(p) = proj {
+        let dir = p.cache_dir().to_path_buf();
+        if let Err(error) = fs::create_dir_all(&dir) {
+            tracing::warn!(
+                "Unable to create cache directory {}: {error}",
+                dir.display()
+            );
+        }
+        return dir;
+    }
+
+    config_dir().join("cache")
+}
+
 pub fn ensure_dirs(cfg: &Config) -> Result<()> {
     fs::create_dir_all(&cfg.bin_dir).context("Failed to create bin_dir")?;
     fs::create_dir_all(&cfg.data_dir).context("Failed to create data_dir")?;

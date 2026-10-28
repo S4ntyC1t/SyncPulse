@@ -9,13 +9,15 @@
 //! the tray) instead of inside a page.
 //!
 //! Layout: submodules by concern — [`api`] (Subsonic), [`player`] (mpv),
-//! [`ui`] (widgets, navigation, cover loading) and [`views`] (page builders).
+//! [`mpris`] (the desktop media controls), [`ui`] (widgets, navigation, cover
+//! loading) and [`views`] (page builders).
 //!
 //! Launch with `navidrome-companion --syncpulse-client`.
 
 #![cfg(target_os = "linux")]
 
 mod api;
+mod mpris;
 mod player;
 mod ui;
 mod views;
